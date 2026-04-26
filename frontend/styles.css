@@ -161,6 +161,12 @@ h2 {
   height: 100%;
   min-height: 520px;
   display: block;
+  cursor: grab;
+  touch-action: none;
+}
+
+#familyCanvas.is-dragging {
+  cursor: grabbing;
 }
 
 .relationship-line {
@@ -179,9 +185,27 @@ h2 {
   stroke-dasharray: 7 9;
 }
 
+.relationship-line.is-related {
+  stroke-width: 4;
+  filter: drop-shadow(0 0 5px rgba(184, 58, 46, 0.32));
+}
+
+.relationship-line.is-dimmed {
+  opacity: 0.18;
+}
+
 .person-node {
   cursor: pointer;
   filter: drop-shadow(0 8px 10px rgba(31, 37, 35, 0.14));
+  transition: opacity 160ms ease, filter 160ms ease;
+}
+
+.person-node.is-related {
+  filter: drop-shadow(0 10px 14px rgba(184, 58, 46, 0.22));
+}
+
+.person-node.is-dimmed {
+  opacity: 0.28;
 }
 
 .person-plaque {

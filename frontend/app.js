@@ -1,4 +1,5 @@
 const familyList = document.querySelector("#familyList");
+const familyCanvas = document.querySelector("#familyCanvas");
 const treeViewport = document.querySelector("#treeViewport");
 const dossierPanel = document.querySelector("#dossierPanel");
 const timelineYear = document.querySelector("#timelineYear");
@@ -6,6 +7,7 @@ const timelineCurrentYear = document.querySelector("#timelineCurrentYear");
 const timelineEvents = document.querySelector("#timelineEvents");
 const searchInput = document.querySelector("#searchInput");
 const searchButton = document.querySelector("#searchButton");
+const branchFilter = document.querySelector("#branchFilter");
 const zoomInButton = document.querySelector("#zoomInButton");
 const zoomOutButton = document.querySelector("#zoomOutButton");
 const resetButton = document.querySelector("#resetButton");
@@ -88,6 +90,8 @@ const auditEntityLabels = {
 let personById = new Map();
 let selectedPersonId = null;
 let zoom = 1;
+let pan = { x: 0, y: 0 };
+let dragState = null;
 
 function createSvgElement(tagName, attributes = {}) {
   const element = document.createElementNS(svgNamespace, tagName);
@@ -144,6 +148,8 @@ function renderRelationship(relationship) {
   const path = createSvgElement("path", {
     class: "relationship-line",
     "data-type": relationship.type,
+    "data-source": relationship.source,
+    "data-target": relationship.target,
   });
 
   if (!from || !to) return path;
@@ -208,13 +214,35 @@ function renderPersonOptions() {
   }
 }
 
+function renderBranchFilter() {
+  const currentValue = branchFilter.value || "all";
+  const branches = [...new Set(graph.persons.map((person) => person.branch))].sort((left, right) =>
+    left.localeCompare(right, "zh-Hans-CN")
+  );
+  branchFilter.innerHTML = [
+    `<option value="all">全部房支</option>`,
+    ...branches.map((branch) => `<option value="${branch}">${branch}</option>`),
+  ].join("");
+  branchFilter.value = branches.includes(currentValue) ? currentValue : "all";
+}
+
+function getVisiblePersons() {
+  if (branchFilter.value === "all") return graph.persons;
+  return graph.persons.filter((person) => person.branch === branchFilter.value);
+}
+
 function renderTree() {
   personById = new Map(graph.persons.map((person) => [person.id, person]));
+  renderBranchFilter();
+  const visiblePersons = getVisiblePersons();
+  const visiblePersonIds = new Set(visiblePersons.map((person) => person.id));
   treeViewport.innerHTML = "";
   const lineLayer = createSvgElement("g");
   const nodeLayer = createSvgElement("g");
-  graph.relationships.forEach((relationship) => lineLayer.append(renderRelationship(relationship)));
-  graph.persons.forEach((person) => nodeLayer.append(renderPerson(person)));
+  graph.relationships
+    .filter((relationship) => visiblePersonIds.has(relationship.source) && visiblePersonIds.has(relationship.target))
+    .forEach((relationship) => lineLayer.append(renderRelationship(relationship)));
+  visiblePersons.forEach((person) => nodeLayer.append(renderPerson(person)));
   treeViewport.append(lineLayer, nodeLayer);
   renderPersonOptions();
   applyZoom();
@@ -336,9 +364,21 @@ function describeRelation(relationship, personId) {
 function selectPerson(personId) {
   selectedPersonId = personId;
   const person = personById.get(personId);
+  const relatedPersonIds = new Set([personId]);
+  graph.relationships.forEach((relationship) => {
+    if (relationship.source === personId) relatedPersonIds.add(relationship.target);
+    if (relationship.target === personId) relatedPersonIds.add(relationship.source);
+  });
 
   document.querySelectorAll(".person-node").forEach((node) => {
     node.classList.toggle("is-selected", node.dataset.personId === personId);
+    node.classList.toggle("is-related", relatedPersonIds.has(node.dataset.personId));
+    node.classList.toggle("is-dimmed", !relatedPersonIds.has(node.dataset.personId));
+  });
+  document.querySelectorAll(".relationship-line").forEach((line) => {
+    const isRelated = line.dataset.source === personId || line.dataset.target === personId;
+    line.classList.toggle("is-related", isRelated);
+    line.classList.toggle("is-dimmed", !isRelated);
   });
 
   const personEvents = graph.events.filter((event) => event.personId === personId);
@@ -408,7 +448,8 @@ function resetPersonEditor() {
   personSummary.value = "";
   archiveTitle.value = "资料待归档";
   archiveSource.value = "家族整理";
-  document.querySelectorAll(".person-node").forEach((node) => node.classList.remove("is-selected"));
+  document.querySelectorAll(".person-node").forEach((node) => node.classList.remove("is-selected", "is-related", "is-dimmed"));
+  document.querySelectorAll(".relationship-line").forEach((line) => line.classList.remove("is-related", "is-dimmed"));
   dossierPanel.innerHTML = `
     <h2>人物档案</h2>
     <p>选择族谱节点后，此处显示人物生平、关系链与关键事件。</p>
@@ -416,7 +457,12 @@ function resetPersonEditor() {
 }
 
 function applyZoom() {
-  treeViewport.setAttribute("transform", `translate(480 300) scale(${zoom.toFixed(2)}) translate(-480 -300)`);
+  treeViewport.setAttribute("data-zoom", zoom.toFixed(2).replace(/\.00$/, ""));
+  treeViewport.setAttribute("data-pan", `${Math.round(pan.x)},${Math.round(pan.y)}`);
+  treeViewport.setAttribute(
+    "transform",
+    `translate(${480 + pan.x} ${300 + pan.y}) scale(${zoom.toFixed(2)}) translate(-480 -300)`
+  );
 }
 
 function searchPerson() {
@@ -426,6 +472,10 @@ function searchPerson() {
     item.name.includes(keyword) || item.generation.includes(keyword) || item.branch.includes(keyword)
   );
   if (person) {
+    if (branchFilter.value !== "all" && person.branch !== branchFilter.value) {
+      branchFilter.value = "all";
+      renderTree();
+    }
     selectPerson(person.id);
     document.querySelector(`.person-node[data-person-id="${person.id}"]`)?.focus();
   }
@@ -630,6 +680,42 @@ async function importFamily(file) {
   systemStatus.textContent = `导入完成：${result.persons} 位人物、${result.relationships} 条关系、${result.events} 条事件、${result.archives} 条资料。`;
 }
 
+function setZoom(nextZoom) {
+  zoom = Math.min(1.6, Math.max(0.65, nextZoom));
+  applyZoom();
+}
+
+function beginCanvasDrag(event) {
+  if (event.button !== 0 || event.target.closest(".person-node")) return;
+  dragState = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    panX: pan.x,
+    panY: pan.y,
+  };
+  familyCanvas.setPointerCapture(event.pointerId);
+  familyCanvas.classList.add("is-dragging");
+}
+
+function moveCanvasDrag(event) {
+  if (!dragState || dragState.pointerId !== event.pointerId) return;
+  pan = {
+    x: dragState.panX + event.clientX - dragState.startX,
+    y: dragState.panY + event.clientY - dragState.startY,
+  };
+  applyZoom();
+}
+
+function endCanvasDrag(event) {
+  if (!dragState || dragState.pointerId !== event.pointerId) return;
+  dragState = null;
+  familyCanvas.classList.remove("is-dragging");
+  if (familyCanvas.hasPointerCapture(event.pointerId)) {
+    familyCanvas.releasePointerCapture(event.pointerId);
+  }
+}
+
 async function boot() {
   const families = await api("/api/families");
   renderFamilies(families);
@@ -644,18 +730,31 @@ searchInput.addEventListener("keydown", (event) => {
     searchPerson();
   }
 });
+branchFilter.addEventListener("change", () => {
+  if (selectedPersonId) resetPersonEditor();
+  renderTree();
+  systemStatus.textContent =
+    branchFilter.value === "all" ? "已显示全部房支" : `已筛选 ${branchFilter.value} 房支`;
+});
 zoomInButton.addEventListener("click", () => {
-  zoom = Math.min(1.3, zoom + 0.15);
-  applyZoom();
+  setZoom(zoom + 0.15);
 });
 zoomOutButton.addEventListener("click", () => {
-  zoom = Math.max(0.7, zoom - 0.15);
-  applyZoom();
+  setZoom(zoom - 0.15);
 });
 resetButton.addEventListener("click", () => {
   zoom = 1;
+  pan = { x: 0, y: 0 };
   applyZoom();
 });
+familyCanvas.addEventListener("wheel", (event) => {
+  event.preventDefault();
+  setZoom(zoom + (event.deltaY < 0 ? 0.08 : -0.08));
+});
+familyCanvas.addEventListener("pointerdown", beginCanvasDrag);
+familyCanvas.addEventListener("pointermove", moveCanvasDrag);
+familyCanvas.addEventListener("pointerup", endCanvasDrag);
+familyCanvas.addEventListener("pointercancel", endCanvasDrag);
 exportButton.addEventListener("click", () => {
   exportFamily().catch((error) => {
     systemStatus.textContent = "导出失败，请检查后端服务。";
