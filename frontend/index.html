@@ -85,6 +85,20 @@
             <label>字辈 <input id="personGeneration" required></label>
             <label>房支 <input id="personBranch" required></label>
             <label>生卒 <input id="personYears" pattern="\d{4}-\d{4}" required></label>
+            <label>性别 <select id="personGender">
+              <option value="unknown">未详</option>
+              <option value="male">男</option>
+              <option value="female">女</option>
+            </select></label>
+            <label>排行 <input id="personRank" placeholder="如：长子、次女"></label>
+            <label>出生地 <input id="personBirthPlace" placeholder="府县、村镇或迁居地"></label>
+            <label>卒地 <input id="personDeathPlace" placeholder="可留空"></label>
+            <label>墓葬地 <input id="personBurialPlace" placeholder="祖茔、墓园或待考"></label>
+            <label>考据状态 <select id="personConfidence">
+              <option value="待校">待校</option>
+              <option value="已校">已校</option>
+              <option value="存疑">存疑</option>
+            </select></label>
             <label class="wide">生平摘要 <textarea id="personSummary"></textarea></label>
             <div class="form-actions">
               <button id="newPersonButton" type="button">新增人物</button>

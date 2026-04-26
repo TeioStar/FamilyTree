@@ -21,6 +21,12 @@ class PersonCreate(BaseModel):
     branch: str = Field(min_length=1, max_length=20)
     years: str = Field(pattern=r"^\d{4}-\d{4}$")
     summary: str = Field(default="", max_length=240)
+    gender: str = Field(default="unknown", pattern=r"^(male|female|unknown)$")
+    birth_place: str = Field(default="", max_length=80)
+    death_place: str = Field(default="", max_length=80)
+    rank: str = Field(default="", max_length=40)
+    burial_place: str = Field(default="", max_length=80)
+    confidence: str = Field(default="待校", pattern=r"^(已校|待校|存疑)$")
 
 
 class PersonUpdate(BaseModel):
@@ -29,6 +35,12 @@ class PersonUpdate(BaseModel):
     branch: str = Field(min_length=1, max_length=20)
     years: str = Field(pattern=r"^\d{4}-\d{4}$")
     summary: str = Field(default="", max_length=240)
+    gender: str = Field(default="unknown", pattern=r"^(male|female|unknown)$")
+    birth_place: str = Field(default="", max_length=80)
+    death_place: str = Field(default="", max_length=80)
+    rank: str = Field(default="", max_length=40)
+    burial_place: str = Field(default="", max_length=80)
+    confidence: str = Field(default="待校", pattern=r"^(已校|待校|存疑)$")
 
 
 class RelationshipCreate(BaseModel):
@@ -66,6 +78,12 @@ class PersonImport(BaseModel):
     x: int
     y: int
     summary: str = Field(default="", max_length=240)
+    gender: str = Field(default="unknown", pattern=r"^(male|female|unknown)$")
+    birth_place: str = Field(default="", max_length=80)
+    death_place: str = Field(default="", max_length=80)
+    rank: str = Field(default="", max_length=40)
+    burial_place: str = Field(default="", max_length=80)
+    confidence: str = Field(default="待校", pattern=r"^(已校|待校|存疑)$")
 
 
 class RelationshipImport(BaseModel):
@@ -286,11 +304,29 @@ def import_family(family_id: str, payload: FamilyImportPayload) -> dict[str, Any
         )
         connection.executemany(
             """
-            INSERT INTO persons(id, name, generation, branch, years, x, y, summary)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO persons(
+                id, name, generation, branch, years, x, y, summary,
+                gender, birth_place, death_place, rank, burial_place, confidence
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
-                (person.id, person.name, person.generation, person.branch, person.years, person.x, person.y, person.summary)
+                (
+                    person.id,
+                    person.name,
+                    person.generation,
+                    person.branch,
+                    person.years,
+                    person.x,
+                    person.y,
+                    person.summary,
+                    person.gender,
+                    person.birth_place,
+                    person.death_place,
+                    person.rank,
+                    person.burial_place,
+                    person.confidence,
+                )
                 for person in payload.data.persons
             ],
         )
@@ -346,10 +382,28 @@ def create_person(family_id: str, payload: PersonCreate) -> dict[str, Any]:
     with connect() as connection:
         connection.execute(
             """
-            INSERT INTO persons(id, name, generation, branch, years, x, y, summary)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO persons(
+                id, name, generation, branch, years, x, y, summary,
+                gender, birth_place, death_place, rank, burial_place, confidence
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (person_id, payload.name, payload.generation, payload.branch, payload.years, x, y, payload.summary),
+            (
+                person_id,
+                payload.name,
+                payload.generation,
+                payload.branch,
+                payload.years,
+                x,
+                y,
+                payload.summary,
+                payload.gender,
+                payload.birth_place,
+                payload.death_place,
+                payload.rank,
+                payload.burial_place,
+                payload.confidence,
+            ),
         )
         record_audit(connection, "create", "person", person_id, f"新增人物：{payload.name}")
     return {"id": person_id, **payload.model_dump(), "x": x, "y": y}
@@ -362,10 +416,34 @@ def update_person(family_id: str, person_id: str, payload: PersonUpdate) -> dict
         cursor = connection.execute(
             """
             UPDATE persons
-            SET name = ?, generation = ?, branch = ?, years = ?, summary = ?
+            SET
+                name = ?,
+                generation = ?,
+                branch = ?,
+                years = ?,
+                summary = ?,
+                gender = ?,
+                birth_place = ?,
+                death_place = ?,
+                rank = ?,
+                burial_place = ?,
+                confidence = ?
             WHERE id = ?
             """,
-            (payload.name, payload.generation, payload.branch, payload.years, payload.summary, person_id),
+            (
+                payload.name,
+                payload.generation,
+                payload.branch,
+                payload.years,
+                payload.summary,
+                payload.gender,
+                payload.birth_place,
+                payload.death_place,
+                payload.rank,
+                payload.burial_place,
+                payload.confidence,
+                person_id,
+            ),
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="人物不存在")

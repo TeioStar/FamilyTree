@@ -26,6 +26,21 @@ PERSON_SEED = [
     ("p12", "沈云岚", "云", "三房", "1916-2001", 810, 444, "三房迁居支系人物。"),
 ]
 
+PERSON_DETAIL_SEED = [
+    ("p1", "male", "苏州府吴县", "苏州府吴县", "始祖", "吴县祖茔", "已校"),
+    ("p2", "female", "苏州府吴县", "苏州府吴县", "配偶", "吴县祖茔", "已校"),
+    ("p3", "male", "苏州府吴县", "苏州府吴县", "长子", "长房祖茔", "已校"),
+    ("p4", "male", "苏州府吴县", "苏州府吴县", "次子", "二房祖茔", "待校"),
+    ("p5", "male", "苏州府吴县", "迁居地", "三子", "三房祖茔", "待校"),
+    ("p6", "female", "苏州府吴县", "苏州府吴县", "配偶", "长房祖茔", "待校"),
+    ("p7", "male", "苏州府吴县", "苏州府吴县", "长孙", "长支墓园", "已校"),
+    ("p8", "male", "苏州府吴县", "苏州府吴县", "次孙", "长支墓园", "存疑"),
+    ("p9", "male", "苏州府吴县", "苏州府吴县", "二房长孙", "二房墓园", "待校"),
+    ("p10", "female", "苏州府吴县", "苏州府吴县", "配偶", "二房墓园", "已校"),
+    ("p11", "male", "苏州府吴县", "迁居地", "三房长孙", "三房墓园", "待校"),
+    ("p12", "female", "迁居地", "迁居地", "三房支系", "迁居地墓园", "存疑"),
+]
+
 RELATIONSHIP_SEED = [
     ("spouse", "p1", "p2"),
     ("spouse", "p3", "p6"),
@@ -85,7 +100,13 @@ def initialize_default_family() -> None:
                 years TEXT NOT NULL,
                 x INTEGER NOT NULL,
                 y INTEGER NOT NULL,
-                summary TEXT NOT NULL
+                summary TEXT NOT NULL,
+                gender TEXT NOT NULL DEFAULT 'unknown',
+                birth_place TEXT NOT NULL DEFAULT '',
+                death_place TEXT NOT NULL DEFAULT '',
+                rank TEXT NOT NULL DEFAULT '',
+                burial_place TEXT NOT NULL DEFAULT '',
+                confidence TEXT NOT NULL DEFAULT '待校'
             );
 
             CREATE TABLE IF NOT EXISTS relationships (
@@ -121,6 +142,22 @@ def initialize_default_family() -> None:
             );
             """
         )
+        person_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(persons)").fetchall()
+        }
+        person_column_defaults = {
+            "gender": "'unknown'",
+            "birth_place": "''",
+            "death_place": "''",
+            "rank": "''",
+            "burial_place": "''",
+            "confidence": "'待校'",
+        }
+        for column_name, default_value in person_column_defaults.items():
+            if column_name not in person_columns:
+                connection.execute(
+                    f"ALTER TABLE persons ADD COLUMN {column_name} TEXT NOT NULL DEFAULT {default_value}"
+                )
         connection.execute(
             """
             DELETE FROM relationships
@@ -150,6 +187,17 @@ def initialize_default_family() -> None:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             PERSON_SEED,
+        )
+        connection.executemany(
+            """
+            UPDATE persons
+            SET gender = ?, birth_place = ?, death_place = ?, rank = ?, burial_place = ?, confidence = ?
+            WHERE id = ?
+            """,
+            [
+                (gender, birth_place, death_place, rank, burial_place, confidence, person_id)
+                for person_id, gender, birth_place, death_place, rank, burial_place, confidence in PERSON_DETAIL_SEED
+            ],
         )
         connection.executemany(
             "INSERT OR IGNORE INTO relationships(type, source, target) VALUES (?, ?, ?)",

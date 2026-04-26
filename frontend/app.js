@@ -30,6 +30,12 @@ const personName = document.querySelector("#personName");
 const personGeneration = document.querySelector("#personGeneration");
 const personBranch = document.querySelector("#personBranch");
 const personYears = document.querySelector("#personYears");
+const personGender = document.querySelector("#personGender");
+const personRank = document.querySelector("#personRank");
+const personBirthPlace = document.querySelector("#personBirthPlace");
+const personDeathPlace = document.querySelector("#personDeathPlace");
+const personBurialPlace = document.querySelector("#personBurialPlace");
+const personConfidence = document.querySelector("#personConfidence");
 const personSummary = document.querySelector("#personSummary");
 const relationshipSource = document.querySelector("#relationshipSource");
 const relationshipType = document.querySelector("#relationshipType");
@@ -59,6 +65,11 @@ const archiveTypeLabels = {
   oral: "口述记录",
   contract: "契据",
   other: "其他",
+};
+const genderLabels = {
+  male: "男",
+  female: "女",
+  unknown: "未详",
 };
 let graph = { persons: [], relationships: [], events: [], archives: [], auditLogs: [] };
 const auditActionLabels = {
@@ -246,7 +257,7 @@ function renderRecords() {
   graph.persons.forEach((person) => {
     appendRecord(personRecords, {
       title: person.name,
-      meta: `${person.branch} · ${person.generation} · ${person.years}`,
+      meta: `${person.branch} · ${person.generation} · ${person.years} · ${person.confidence || "待校"}`,
       actions: [
         { label: "选择", action: "select-person", id: person.id },
         { label: "删除", action: "delete-person", id: person.id },
@@ -344,6 +355,12 @@ function selectPerson(personId) {
       <dt>房支</dt><dd>${person.branch}</dd>
       <dt>字辈</dt><dd>${person.generation}</dd>
       <dt>生卒</dt><dd>${person.years}</dd>
+      <dt>性别</dt><dd>${genderLabels[person.gender] || genderLabels.unknown}</dd>
+      <dt>排行</dt><dd>${person.rank || "未详"}</dd>
+      <dt>出生地</dt><dd>${person.birth_place || "未详"}</dd>
+      <dt>卒地</dt><dd>${person.death_place || "未详"}</dd>
+      <dt>墓葬地</dt><dd>${person.burial_place || "未详"}</dd>
+      <dt>考据状态</dt><dd>${person.confidence || "待校"}</dd>
     </dl>
     <h3>关系链</h3>
     <ul>${relationItems || "<li>暂无关系</li>"}</ul>
@@ -358,6 +375,12 @@ function selectPerson(personId) {
   personGeneration.value = person.generation;
   personBranch.value = person.branch;
   personYears.value = person.years;
+  personGender.value = person.gender || "unknown";
+  personRank.value = person.rank || "";
+  personBirthPlace.value = person.birth_place || "";
+  personDeathPlace.value = person.death_place || "";
+  personBurialPlace.value = person.burial_place || "";
+  personConfidence.value = person.confidence || "待校";
   personSummary.value = person.summary;
   relationshipSource.value = person.id;
   eventPerson.value = person.id;
@@ -376,6 +399,12 @@ function resetPersonEditor() {
   personGeneration.value = "";
   personBranch.value = "";
   personYears.value = "2000-2026";
+  personGender.value = "unknown";
+  personRank.value = "";
+  personBirthPlace.value = "";
+  personDeathPlace.value = "";
+  personBurialPlace.value = "";
+  personConfidence.value = "待校";
   personSummary.value = "";
   archiveTitle.value = "资料待归档";
   archiveSource.value = "家族整理";
@@ -410,6 +439,12 @@ async function savePerson(event) {
     branch: personBranch.value.trim(),
     years: personYears.value.trim(),
     summary: personSummary.value.trim(),
+    gender: personGender.value,
+    birth_place: personBirthPlace.value.trim(),
+    death_place: personDeathPlace.value.trim(),
+    rank: personRank.value.trim(),
+    burial_place: personBurialPlace.value.trim(),
+    confidence: personConfidence.value,
   };
 
   if (selectedPersonId) {

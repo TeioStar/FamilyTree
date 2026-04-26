@@ -13,6 +13,13 @@ def test_graph_contains_seed_family():
     data = response.json()
     assert len(data["persons"]) >= 12
     assert any(person["name"] == "沈怀远" for person in data["persons"])
+    seed_person = next(person for person in data["persons"] if person["id"] == "p1")
+    assert seed_person["gender"] == "male"
+    assert seed_person["birth_place"] == "苏州府吴县"
+    assert seed_person["death_place"] == "苏州府吴县"
+    assert seed_person["rank"] == "始祖"
+    assert seed_person["burial_place"] == "吴县祖茔"
+    assert seed_person["confidence"] == "已校"
     assert any(edge["type"] == "spouse" for edge in data["relationships"])
     assert any(archive["type"] == "manuscript" for archive in data["archives"])
     assert any(log["entityType"] == "family" for log in data["auditLogs"])
@@ -27,6 +34,9 @@ def test_export_family_contains_complete_archive_payload():
     assert data["schemaVersion"] == 1
     assert data["family"]["id"] == "shen-wuxian"
     assert len(data["data"]["persons"]) >= 12
+    exported_person = next(person for person in data["data"]["persons"] if person["id"] == "p1")
+    assert exported_person["birth_place"] == "苏州府吴县"
+    assert exported_person["confidence"] == "已校"
     assert data["data"]["relationships"]
     assert data["data"]["events"]
     assert data["data"]["archives"]
@@ -43,6 +53,12 @@ def test_import_family_restores_export_payload():
             "branch": "导入支",
             "years": "1999-2026",
             "summary": "导入恢复后应被移除",
+            "gender": "unknown",
+            "birth_place": "临时地",
+            "death_place": "",
+            "rank": "测试",
+            "burial_place": "",
+            "confidence": "待校",
         },
     )
     assert create_response.status_code == 201
@@ -53,6 +69,9 @@ def test_import_family_restores_export_payload():
     assert import_response.json()["persons"] == len(export_payload["data"]["persons"])
     graph = client.get("/api/families/shen-wuxian/graph").json()
     assert all(person["name"] != "临时导入测试" for person in graph["persons"])
+    restored_person = next(person for person in graph["persons"] if person["id"] == "p1")
+    assert restored_person["birth_place"] == "苏州府吴县"
+    assert restored_person["confidence"] == "已校"
     assert any(log["action"] == "import" and log["entityType"] == "family" for log in graph["auditLogs"])
 
 
@@ -74,6 +93,12 @@ def test_create_person_persists_to_family_database():
             "branch": "新支",
             "years": "1990-2026",
             "summary": "测试录入人物",
+            "gender": "male",
+            "birth_place": "无锡县",
+            "death_place": "",
+            "rank": "长孙",
+            "burial_place": "新支墓园",
+            "confidence": "待校",
         },
     )
 
@@ -81,7 +106,10 @@ def test_create_person_persists_to_family_database():
     person_id = response.json()["id"]
 
     graph = client.get("/api/families/shen-wuxian/graph").json()
-    assert any(person["id"] == person_id and person["name"] == "沈新录" for person in graph["persons"])
+    created_person = next(person for person in graph["persons"] if person["id"] == person_id)
+    assert created_person["name"] == "沈新录"
+    assert created_person["birth_place"] == "无锡县"
+    assert created_person["rank"] == "长孙"
     assert any(log["action"] == "create" and log["entityId"] == person_id for log in graph["auditLogs"])
 
 
@@ -94,11 +122,20 @@ def test_update_person_records_audit_log():
             "branch": "宗祖",
             "years": "1841-1912",
             "summary": "族谱主干人物，主持修谱与校订。",
+            "gender": "male",
+            "birth_place": "苏州府吴县",
+            "death_place": "无锡迁居地",
+            "rank": "始祖",
+            "burial_place": "吴县祖茔东侧",
+            "confidence": "已校",
         },
     )
 
     assert response.status_code == 200
     graph = client.get("/api/families/shen-wuxian/graph").json()
+    updated_person = next(person for person in graph["persons"] if person["id"] == "p1")
+    assert updated_person["death_place"] == "无锡迁居地"
+    assert updated_person["burial_place"] == "吴县祖茔东侧"
     assert any(log["action"] == "update" and log["entityId"] == "p1" for log in graph["auditLogs"])
 
 
