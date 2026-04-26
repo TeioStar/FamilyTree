@@ -41,6 +41,13 @@ class EventCreate(BaseModel):
     title: str = Field(min_length=1, max_length=80)
 
 
+class ArchiveCreate(BaseModel):
+    person_id: str = Field(min_length=1, max_length=40)
+    type: str = Field(pattern=r"^(manuscript|photo|epitaph|oral|contract|other)$")
+    title: str = Field(min_length=1, max_length=80)
+    source: str = Field(min_length=1, max_length=80)
+
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -86,6 +93,7 @@ def list_families() -> list[dict[str, Any]]:
         person_count = connection.execute("SELECT COUNT(*) FROM persons").fetchone()[0]
         relationship_count = connection.execute("SELECT COUNT(*) FROM relationships").fetchone()[0]
         event_count = connection.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        archive_count = connection.execute("SELECT COUNT(*) FROM archives").fetchone()[0]
 
     return [
         {
@@ -97,6 +105,7 @@ def list_families() -> list[dict[str, Any]]:
                 "persons": person_count,
                 "relationships": relationship_count,
                 "events": event_count,
+                "archives": archive_count,
                 "completeness": 86,
             },
         }
@@ -110,7 +119,18 @@ def get_graph(family_id: str) -> dict[str, Any]:
         persons = rows_to_dicts(connection.execute("SELECT * FROM persons ORDER BY y, x").fetchall())
         relationships = rows_to_dicts(connection.execute("SELECT id, type, source AS source, target AS target FROM relationships").fetchall())
         events = rows_to_dicts(connection.execute("SELECT id, person_id AS personId, year, title FROM events ORDER BY year").fetchall())
-    return {"familyId": family_id, "persons": persons, "relationships": relationships, "events": events}
+        archives = rows_to_dicts(
+            connection.execute(
+                "SELECT id, person_id AS personId, type, title, source FROM archives ORDER BY title"
+            ).fetchall()
+        )
+    return {
+        "familyId": family_id,
+        "persons": persons,
+        "relationships": relationships,
+        "events": events,
+        "archives": archives,
+    }
 
 
 @app.post("/api/families/{family_id}/persons", status_code=201)
@@ -155,6 +175,7 @@ def delete_person(family_id: str, person_id: str):
             raise HTTPException(status_code=404, detail="人物不存在")
         connection.execute("DELETE FROM relationships WHERE source = ? OR target = ?", (person_id, person_id))
         connection.execute("DELETE FROM events WHERE person_id = ?", (person_id,))
+        connection.execute("DELETE FROM archives WHERE person_id = ?", (person_id,))
 
 
 @app.post("/api/families/{family_id}/relationships", status_code=201)
@@ -208,6 +229,34 @@ def delete_event(family_id: str, event_id: str):
         cursor = connection.execute("DELETE FROM events WHERE id = ?", (event_id,))
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="事件不存在")
+
+
+@app.post("/api/families/{family_id}/archives", status_code=201)
+def create_archive(family_id: str, payload: ArchiveCreate) -> dict[str, Any]:
+    assert_family(family_id)
+    archive_id = f"a-{uuid4().hex[:8]}"
+    with connect() as connection:
+        assert_person_exists(connection, payload.person_id)
+        connection.execute(
+            "INSERT INTO archives(id, person_id, type, title, source) VALUES (?, ?, ?, ?, ?)",
+            (archive_id, payload.person_id, payload.type, payload.title, payload.source),
+        )
+    return {
+        "id": archive_id,
+        "personId": payload.person_id,
+        "type": payload.type,
+        "title": payload.title,
+        "source": payload.source,
+    }
+
+
+@app.delete("/api/families/{family_id}/archives/{archive_id}", status_code=204, response_class=Response)
+def delete_archive(family_id: str, archive_id: str):
+    assert_family(family_id)
+    with connect() as connection:
+        cursor = connection.execute("DELETE FROM archives WHERE id = ?", (archive_id,))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="资料不存在")
 
 
 frontend_dir = ROOT_DIR / "frontend"

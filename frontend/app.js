@@ -14,10 +14,12 @@ const systemStatus = document.querySelector("#systemStatus");
 const personForm = document.querySelector("#personForm");
 const relationshipForm = document.querySelector("#relationshipForm");
 const eventForm = document.querySelector("#eventForm");
+const archiveForm = document.querySelector("#archiveForm");
 const newPersonButton = document.querySelector("#newPersonButton");
 const personRecords = document.querySelector("#personRecords");
 const relationshipRecords = document.querySelector("#relationshipRecords");
 const eventRecords = document.querySelector("#eventRecords");
+const archiveRecords = document.querySelector("#archiveRecords");
 const tabButtons = document.querySelectorAll("[data-tab]");
 const panes = document.querySelectorAll("[data-pane]");
 const personName = document.querySelector("#personName");
@@ -31,6 +33,10 @@ const relationshipTarget = document.querySelector("#relationshipTarget");
 const eventPerson = document.querySelector("#eventPerson");
 const eventYear = document.querySelector("#eventYear");
 const eventTitle = document.querySelector("#eventTitle");
+const archivePerson = document.querySelector("#archivePerson");
+const archiveType = document.querySelector("#archiveType");
+const archiveTitle = document.querySelector("#archiveTitle");
+const archiveSource = document.querySelector("#archiveSource");
 
 const svgNamespace = "http://www.w3.org/2000/svg";
 const nodeWidth = 112;
@@ -42,7 +48,15 @@ const relationshipTypeLabels = {
   adoptive: "收养",
   collateral: "旁系",
 };
-let graph = { persons: [], relationships: [], events: [] };
+const archiveTypeLabels = {
+  manuscript: "族谱手稿",
+  photo: "照片",
+  epitaph: "墓志",
+  oral: "口述记录",
+  contract: "契据",
+  other: "其他",
+};
+let graph = { persons: [], relationships: [], events: [], archives: [] };
 let personById = new Map();
 let selectedPersonId = null;
 let zoom = 1;
@@ -79,6 +93,7 @@ function renderFamilies(families) {
         <div class="metric-card"><b>${family.stats.persons}</b><span>人物</span></div>
         <div class="metric-card"><b>${family.stats.relationships}</b><span>关系</span></div>
         <div class="metric-card"><b>${family.stats.events}</b><span>纪事</span></div>
+        <div class="metric-card"><b>${family.stats.archives}</b><span>资料</span></div>
         <div class="metric-card"><b>${family.stats.completeness}%</b><span>完整度</span></div>
       </div>
     </div>
@@ -156,10 +171,12 @@ function renderPersonOptions() {
   relationshipSource.innerHTML = options;
   relationshipTarget.innerHTML = options;
   eventPerson.innerHTML = options;
+  archivePerson.innerHTML = options;
 
   if (selectedPersonId && personById.has(selectedPersonId)) {
     relationshipSource.value = selectedPersonId;
     eventPerson.value = selectedPersonId;
+    archivePerson.value = selectedPersonId;
   }
 }
 
@@ -206,6 +223,7 @@ function renderRecords() {
   personRecords.innerHTML = "";
   relationshipRecords.innerHTML = "";
   eventRecords.innerHTML = "";
+  archiveRecords.innerHTML = "";
 
   graph.persons.forEach((person) => {
     appendRecord(personRecords, {
@@ -234,6 +252,15 @@ function renderRecords() {
       title: `${event.year} 年 · ${event.title}`,
       meta: person ? person.name : "未关联人物",
       actions: [{ label: "删除", action: "delete-event", id: event.id }],
+    });
+  });
+
+  graph.archives.forEach((archive) => {
+    const person = personById.get(archive.personId);
+    appendRecord(archiveRecords, {
+      title: archive.title,
+      meta: `${archiveTypeLabels[archive.type] || archive.type} · ${archive.source} · ${person ? person.name : "未关联人物"}`,
+      actions: [{ label: "删除", action: "delete-archive", id: archive.id }],
     });
   });
 }
@@ -278,6 +305,7 @@ function selectPerson(personId) {
   });
 
   const personEvents = graph.events.filter((event) => event.personId === personId);
+  const personArchives = graph.archives.filter((archive) => archive.personId === personId);
   const relationItems = graph.relationships
     .filter((relationship) => relationship.source === personId || relationship.target === personId)
     .map((relationship) => `<li>${describeRelation(relationship, personId)}</li>`)
@@ -295,6 +323,8 @@ function selectPerson(personId) {
     <ul>${relationItems || "<li>暂无关系</li>"}</ul>
     <h3>关键事件</h3>
     <ul>${personEvents.map((event) => `<li>${event.year} 年 ${event.title}</li>`).join("") || "<li>暂无事件</li>"}</ul>
+    <h3>归档资料</h3>
+    <ul>${personArchives.map((archive) => `<li>${archiveTypeLabels[archive.type] || archive.type} · ${archive.title}</li>`).join("") || "<li>暂无资料</li>"}</ul>
   `;
 
   selectedName.textContent = person.name;
@@ -305,8 +335,11 @@ function selectPerson(personId) {
   personSummary.value = person.summary;
   relationshipSource.value = person.id;
   eventPerson.value = person.id;
+  archivePerson.value = person.id;
   eventYear.value = personEvents[0]?.year || timelineYear.value;
   eventTitle.value = personEvents[0]?.title || "家族纪事待补录";
+  archiveTitle.value = personArchives[0]?.title || "资料待归档";
+  archiveSource.value = personArchives[0]?.source || "家族整理";
   systemStatus.textContent = `已载入 ${person.name} 的人物档案`;
 }
 
@@ -318,6 +351,8 @@ function resetPersonEditor() {
   personBranch.value = "";
   personYears.value = "2000-2026";
   personSummary.value = "";
+  archiveTitle.value = "资料待归档";
+  archiveSource.value = "家族整理";
   document.querySelectorAll(".person-node").forEach((node) => node.classList.remove("is-selected"));
   dossierPanel.innerHTML = `
     <h2>人物档案</h2>
@@ -409,6 +444,24 @@ async function saveEvent(event) {
   selectPerson(payload.person_id);
 }
 
+async function saveArchive(event) {
+  event.preventDefault();
+  const payload = {
+    person_id: archivePerson.value,
+    type: archiveType.value,
+    title: archiveTitle.value.trim(),
+    source: archiveSource.value.trim(),
+  };
+
+  await api(`/api/families/${familyId}/archives`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  systemStatus.textContent = "资料已归档，档案清单已刷新。";
+  await loadGraph();
+  selectPerson(payload.person_id);
+}
+
 async function deletePerson(personId) {
   const person = personById.get(personId);
   const personNameText = person ? person.name : "该人物";
@@ -437,6 +490,15 @@ async function deleteEvent(eventId) {
   systemStatus.textContent = "事件已删除，时间轴已刷新";
 }
 
+async function deleteArchive(archiveId) {
+  if (!window.confirm("确认删除这条资料？")) return;
+
+  await api(`/api/families/${familyId}/archives/${archiveId}`, { method: "DELETE" });
+  await loadGraph();
+  if (selectedPersonId && personById.has(selectedPersonId)) selectPerson(selectedPersonId);
+  systemStatus.textContent = "资料已删除，档案清单已刷新";
+}
+
 async function handleRecordAction(event) {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
@@ -459,6 +521,11 @@ async function handleRecordAction(event) {
 
   if (action === "delete-event") {
     await deleteEvent(id);
+    return;
+  }
+
+  if (action === "delete-archive") {
+    await deleteArchive(id);
   }
 }
 
@@ -497,9 +564,11 @@ timelineYear.addEventListener("input", updateTimeline);
 personForm.addEventListener("submit", savePerson);
 relationshipForm.addEventListener("submit", saveRelationship);
 eventForm.addEventListener("submit", saveEvent);
+archiveForm.addEventListener("submit", saveArchive);
 personRecords.addEventListener("click", handleRecordAction);
 relationshipRecords.addEventListener("click", handleRecordAction);
 eventRecords.addEventListener("click", handleRecordAction);
+archiveRecords.addEventListener("click", handleRecordAction);
 newPersonButton.addEventListener("click", () => {
   resetPersonEditor();
   selectedName.textContent = "新人物";

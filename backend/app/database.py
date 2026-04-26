@@ -49,6 +49,11 @@ EVENT_SEED = [
     ("e4", "p12", 1916, "三房迁居"),
 ]
 
+ARCHIVE_SEED = [
+    ("a1", "p7", "manuscript", "1922 年手稿影印", "族谱手稿"),
+    ("a2", "p10", "photo", "二房合影照片", "照片"),
+]
+
 
 def connect(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -92,6 +97,14 @@ def initialize_default_family() -> None:
                 year INTEGER NOT NULL,
                 title TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS archives (
+                id TEXT PRIMARY KEY,
+                person_id TEXT NOT NULL,
+                type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                source TEXT NOT NULL
+            );
             """
         )
         connection.execute(
@@ -131,6 +144,10 @@ def initialize_default_family() -> None:
         connection.executemany(
             "INSERT OR IGNORE INTO events(id, person_id, year, title) VALUES (?, ?, ?, ?)",
             EVENT_SEED,
+        )
+        connection.executemany(
+            "INSERT OR IGNORE INTO archives(id, person_id, type, title, source) VALUES (?, ?, ?, ?, ?)",
+            ARCHIVE_SEED,
         )
 
 

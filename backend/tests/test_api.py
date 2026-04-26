@@ -14,6 +14,7 @@ def test_graph_contains_seed_family():
     assert len(data["persons"]) >= 12
     assert any(person["name"] == "沈怀远" for person in data["persons"])
     assert any(edge["type"] == "spouse" for edge in data["relationships"])
+    assert any(archive["type"] == "manuscript" for archive in data["archives"])
 
 
 def test_create_person_persists_to_family_database():
@@ -86,3 +87,54 @@ def test_create_and_delete_event():
 
     delete_response = client.delete(f"/api/families/shen-wuxian/events/{event_id}")
     assert delete_response.status_code == 204
+
+
+def test_create_and_delete_archive():
+    create_response = client.post(
+        "/api/families/shen-wuxian/archives",
+        json={
+            "person_id": "p1",
+            "type": "oral",
+            "title": "Oral history record",
+            "source": "Family interview",
+        },
+    )
+
+    assert create_response.status_code == 201
+    archive_id = create_response.json()["id"]
+
+    graph = client.get("/api/families/shen-wuxian/graph").json()
+    assert any(archive["id"] == archive_id and archive["source"] == "Family interview" for archive in graph["archives"])
+
+    delete_response = client.delete(f"/api/families/shen-wuxian/archives/{archive_id}")
+    assert delete_response.status_code == 204
+
+
+def test_delete_person_removes_related_archives():
+    person_response = client.post(
+        "/api/families/shen-wuxian/persons",
+        json={
+            "name": "Archive Owner",
+            "generation": "A",
+            "branch": "Archive",
+            "years": "1990-2026",
+            "summary": "Owns archive records",
+        },
+    )
+    person_id = person_response.json()["id"]
+    archive_response = client.post(
+        "/api/families/shen-wuxian/archives",
+        json={
+            "person_id": person_id,
+            "type": "photo",
+            "title": "Portrait",
+            "source": "Private album",
+        },
+    )
+    archive_id = archive_response.json()["id"]
+
+    delete_response = client.delete(f"/api/families/shen-wuxian/persons/{person_id}")
+
+    assert delete_response.status_code == 204
+    graph = client.get("/api/families/shen-wuxian/graph").json()
+    assert all(archive["id"] != archive_id for archive in graph["archives"])

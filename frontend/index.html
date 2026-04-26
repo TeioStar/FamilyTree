@@ -111,12 +111,22 @@
             </div>
           </form>
 
-          <section id="archivePane" class="management-pane archive-pane" data-pane="archive">
-            <div>
-              <strong>资料归档</strong>
-              <p>下一步将接入族谱扫描件、照片、墓志、口述记录与审计日志。</p>
+          <form id="archiveForm" class="management-grid management-pane" data-pane="archive">
+            <label>人物 <select id="archivePerson" required></select></label>
+            <label>类型 <select id="archiveType" required>
+              <option value="manuscript">族谱手稿</option>
+              <option value="photo">照片</option>
+              <option value="epitaph">墓志</option>
+              <option value="oral">口述记录</option>
+              <option value="contract">契据</option>
+              <option value="other">其他</option>
+            </select></label>
+            <label>资料标题 <input id="archiveTitle" value="资料待归档" required></label>
+            <label>来源 <input id="archiveSource" value="家族整理" required></label>
+            <div class="form-actions">
+              <button type="submit">保存资料</button>
             </div>
-          </section>
+          </form>
 
           <section class="records-panel" aria-label="数据清单">
             <div>
@@ -130,6 +140,10 @@
             <div>
               <h3>事件列表</h3>
               <div id="eventRecords" class="record-list"></div>
+            </div>
+            <div>
+              <h3>资料列表</h3>
+              <div id="archiveRecords" class="record-list"></div>
             </div>
           </section>
         </section>
