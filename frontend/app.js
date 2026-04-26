@@ -1,4 +1,7 @@
 const familyList = document.querySelector("#familyList");
+const familyForm = document.querySelector("#familyForm");
+const familyName = document.querySelector("#familyName");
+const familySlug = document.querySelector("#familySlug");
 const familyCanvas = document.querySelector("#familyCanvas");
 const treeViewport = document.querySelector("#treeViewport");
 const dossierPanel = document.querySelector("#dossierPanel");
@@ -54,7 +57,7 @@ const archiveFile = document.querySelector("#archiveFile");
 const svgNamespace = "http://www.w3.org/2000/svg";
 const nodeWidth = 112;
 const nodeHeight = 78;
-const familyId = "shen-wuxian";
+let familyId = "shen-wuxian";
 const relationshipTypeLabels = {
   parent: "父母/子女",
   spouse: "配偶",
@@ -119,9 +122,9 @@ async function api(path, options = {}) {
 
 function renderFamilies(families) {
   familyList.innerHTML = families.map((family) => `
-    <div class="family-card">
+    <div class="family-card ${family.id === familyId ? "is-active" : ""}">
       <strong>${family.name}</strong>
-      <span>当前角色 ${family.role} · 状态 ${family.status}</span>
+      <span>${family.id} · 当前角色 ${family.role} · 状态 ${family.status}</span>
       <div class="metric-grid">
         <div class="metric-card"><b>${family.stats.persons}</b><span>人物</span></div>
         <div class="metric-card"><b>${family.stats.relationships}</b><span>关系</span></div>
@@ -129,6 +132,7 @@ function renderFamilies(families) {
         <div class="metric-card"><b>${family.stats.archives}</b><span>资料</span></div>
         <div class="metric-card"><b>${family.stats.completeness}%</b><span>完整度</span></div>
       </div>
+      <button type="button" data-family-id="${family.id}">${family.id === familyId ? "当前家谱" : "进入家谱"}</button>
     </div>
   `).join("");
 }
@@ -684,6 +688,43 @@ async function loadGraph() {
   renderTree();
 }
 
+async function refreshFamilies() {
+  const families = await api("/api/families");
+  renderFamilies(families);
+}
+
+async function selectFamily(nextFamilyId) {
+  if (familyId === nextFamilyId) return;
+  familyId = nextFamilyId;
+  selectedPersonId = null;
+  resetPersonEditor();
+  await refreshFamilies();
+  await loadGraph();
+  systemStatus.textContent = `已切换到家谱库 ${nextFamilyId}`;
+}
+
+async function createFamily(event) {
+  event.preventDefault();
+  const payload = {
+    id: familySlug.value.trim(),
+    name: familyName.value.trim(),
+    role: "creator",
+    status: "draft",
+  };
+
+  await api("/api/families", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  familyId = payload.id;
+  familyForm.reset();
+  selectedPersonId = null;
+  resetPersonEditor();
+  await refreshFamilies();
+  await loadGraph();
+  systemStatus.textContent = `已创建并进入 ${payload.name}`;
+}
+
 async function exportFamily() {
   const response = await fetch(`/api/families/${familyId}/export`);
   if (!response.ok) {
@@ -713,8 +754,7 @@ async function importFamily(file) {
   });
   selectedPersonId = null;
   resetPersonEditor();
-  const families = await api("/api/families");
-  renderFamilies(families);
+  await refreshFamilies();
   await loadGraph();
   systemStatus.textContent = `导入完成：${result.persons} 位人物、${result.relationships} 条关系、${result.events} 条事件、${result.archives} 条资料。`;
 }
@@ -756,13 +796,27 @@ function endCanvasDrag(event) {
 }
 
 async function boot() {
-  const families = await api("/api/families");
-  renderFamilies(families);
+  await refreshFamilies();
   await loadGraph();
   systemStatus.textContent = "系统已连接后端 API，可读写 SQLite 家谱文件。";
 }
 
 searchButton.addEventListener("click", searchPerson);
+familyForm.addEventListener("submit", (event) => {
+  createFamily(event).catch((error) => {
+    systemStatus.textContent = "创建家谱失败，请确认英文标识未重复。";
+    console.error(error);
+  });
+});
+familyList.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-family-id]");
+  if (!button) return;
+
+  selectFamily(button.dataset.familyId).catch((error) => {
+    systemStatus.textContent = "切换家谱失败，请检查后端服务。";
+    console.error(error);
+  });
+});
 searchInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();

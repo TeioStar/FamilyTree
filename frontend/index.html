@@ -31,6 +31,12 @@
         <aside id="familyRegistry" class="panel registry-panel">
           <h2>家谱库</h2>
           <div id="familyList" class="family-list">正在读取家谱文件...</div>
+          <form id="familyForm" class="family-form">
+            <strong>新建家谱</strong>
+            <input id="familyName" placeholder="家谱名称" required>
+            <input id="familySlug" placeholder="英文标识，如 chen-haizhou" pattern="[a-z0-9][a-z0-9-]*" required>
+            <button type="submit">创建家谱</button>
+          </form>
           <div class="workflow">
             <strong>系统流程</strong>
             <ol>

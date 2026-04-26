@@ -12,7 +12,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .database import DEFAULT_FAMILY_ID, ROOT_DIR, connect, initialize_default_family, rows_to_dicts
+from .database import (
+    DEFAULT_FAMILY_ID,
+    FAMILY_DB_DIR,
+    ROOT_DIR,
+    connect,
+    family_db_path,
+    initialize_default_family,
+    initialize_empty_family,
+    rows_to_dicts,
+)
 
 
 UPLOAD_DIR = ROOT_DIR / "backend" / "data" / "uploads"
@@ -30,6 +39,13 @@ class PersonCreate(BaseModel):
     rank: str = Field(default="", max_length=40)
     burial_place: str = Field(default="", max_length=80)
     confidence: str = Field(default="待校", pattern=r"^(已校|待校|存疑)$")
+
+
+class FamilyCreate(BaseModel):
+    id: str = Field(min_length=2, max_length=80, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    name: str = Field(min_length=1, max_length=80)
+    role: str = Field(default="creator", min_length=1, max_length=40)
+    status: str = Field(default="draft", min_length=1, max_length=40)
 
 
 class PersonUpdate(BaseModel):
@@ -155,13 +171,15 @@ app.add_middleware(
 )
 
 
-def assert_family(family_id: str) -> None:
-    if family_id != DEFAULT_FAMILY_ID:
+def assert_family(family_id: str) -> Path:
+    db_path = family_db_path(family_id)
+    if not db_path.exists():
         raise HTTPException(status_code=404, detail="家谱不存在")
+    return db_path
 
 
-def next_position() -> tuple[int, int]:
-    with connect() as connection:
+def next_position(family_id: str) -> tuple[int, int]:
+    with connect(assert_family(family_id)) as connection:
         count = connection.execute("SELECT COUNT(*) FROM persons").fetchone()[0]
     return 90 + (count % 5) * 160, 500 + (count // 5) * 122
 
@@ -212,15 +230,16 @@ def health() -> dict[str, str]:
 
 @app.get("/api/families")
 def list_families() -> list[dict[str, Any]]:
-    with connect() as connection:
-        meta = {row["key"]: row["value"] for row in connection.execute("SELECT key, value FROM meta")}
-        person_count = connection.execute("SELECT COUNT(*) FROM persons").fetchone()[0]
-        relationship_count = connection.execute("SELECT COUNT(*) FROM relationships").fetchone()[0]
-        event_count = connection.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-        archive_count = connection.execute("SELECT COUNT(*) FROM archives").fetchone()[0]
+    families = []
+    for db_path in sorted(FAMILY_DB_DIR.glob("*.ftree.db")):
+        with connect(db_path) as connection:
+            meta = {row["key"]: row["value"] for row in connection.execute("SELECT key, value FROM meta")}
+            person_count = connection.execute("SELECT COUNT(*) FROM persons").fetchone()[0]
+            relationship_count = connection.execute("SELECT COUNT(*) FROM relationships").fetchone()[0]
+            event_count = connection.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            archive_count = connection.execute("SELECT COUNT(*) FROM archives").fetchone()[0]
 
-    return [
-        {
+        families.append({
             "id": meta["family_id"],
             "name": meta["name"],
             "role": meta["role"],
@@ -230,16 +249,32 @@ def list_families() -> list[dict[str, Any]]:
                 "relationships": relationship_count,
                 "events": event_count,
                 "archives": archive_count,
-                "completeness": 86,
+                "completeness": 86 if person_count else 0,
             },
-        }
-    ]
+        })
+    return families
+
+
+@app.post("/api/families", status_code=201)
+def create_family(payload: FamilyCreate) -> dict[str, Any]:
+    db_path = family_db_path(payload.id)
+    if db_path.exists():
+        raise HTTPException(status_code=409, detail="家谱已存在")
+
+    initialize_empty_family(payload.id, payload.name, payload.role, payload.status)
+    return {
+        "id": payload.id,
+        "name": payload.name,
+        "role": payload.role,
+        "status": payload.status,
+        "stats": {"persons": 0, "relationships": 0, "events": 0, "archives": 0, "completeness": 0},
+    }
 
 
 @app.get("/api/families/{family_id}/graph")
 def get_graph(family_id: str) -> dict[str, Any]:
-    assert_family(family_id)
-    with connect() as connection:
+    db_path = assert_family(family_id)
+    with connect(db_path) as connection:
         persons = rows_to_dicts(connection.execute("SELECT * FROM persons ORDER BY y, x").fetchall())
         relationships = rows_to_dicts(connection.execute("SELECT id, type, source AS source, target AS target FROM relationships").fetchall())
         events = rows_to_dicts(connection.execute("SELECT id, person_id AS personId, year, title FROM events ORDER BY year").fetchall())
@@ -290,9 +325,9 @@ def get_graph(family_id: str) -> dict[str, Any]:
 
 @app.get("/api/families/{family_id}/export")
 def export_family(family_id: str) -> JSONResponse:
-    assert_family(family_id)
+    db_path = assert_family(family_id)
     graph = get_graph(family_id)
-    with connect() as connection:
+    with connect(db_path) as connection:
         meta = {row["key"]: row["value"] for row in connection.execute("SELECT key, value FROM meta")}
 
     payload = {
@@ -314,7 +349,7 @@ def export_family(family_id: str) -> JSONResponse:
 
 @app.post("/api/families/{family_id}/import")
 def import_family(family_id: str, payload: FamilyImportPayload) -> dict[str, Any]:
-    assert_family(family_id)
+    db_path = assert_family(family_id)
     if payload.schemaVersion != 1:
         raise HTTPException(status_code=400, detail="暂不支持该导入版本")
     if payload.family.id != family_id:
@@ -322,7 +357,7 @@ def import_family(family_id: str, payload: FamilyImportPayload) -> dict[str, Any
 
     validate_import_references(payload)
 
-    with connect() as connection:
+    with connect(db_path) as connection:
         connection.execute("DELETE FROM relationships")
         connection.execute("DELETE FROM events")
         connection.execute("DELETE FROM archives")
@@ -424,10 +459,10 @@ def import_family(family_id: str, payload: FamilyImportPayload) -> dict[str, Any
 
 @app.post("/api/families/{family_id}/persons", status_code=201)
 def create_person(family_id: str, payload: PersonCreate) -> dict[str, Any]:
-    assert_family(family_id)
+    db_path = assert_family(family_id)
     person_id = f"p-{uuid4().hex[:8]}"
-    x, y = next_position()
-    with connect() as connection:
+    x, y = next_position(family_id)
+    with connect(db_path) as connection:
         connection.execute(
             """
             INSERT INTO persons(
@@ -459,8 +494,8 @@ def create_person(family_id: str, payload: PersonCreate) -> dict[str, Any]:
 
 @app.put("/api/families/{family_id}/persons/{person_id}")
 def update_person(family_id: str, person_id: str, payload: PersonUpdate) -> dict[str, Any]:
-    assert_family(family_id)
-    with connect() as connection:
+    db_path = assert_family(family_id)
+    with connect(db_path) as connection:
         cursor = connection.execute(
             """
             UPDATE persons
@@ -501,8 +536,8 @@ def update_person(family_id: str, person_id: str, payload: PersonUpdate) -> dict
 
 @app.delete("/api/families/{family_id}/persons/{person_id}", status_code=204, response_class=Response)
 def delete_person(family_id: str, person_id: str):
-    assert_family(family_id)
-    with connect() as connection:
+    db_path = assert_family(family_id)
+    with connect(db_path) as connection:
         cursor = connection.execute("DELETE FROM persons WHERE id = ?", (person_id,))
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="人物不存在")
@@ -514,11 +549,11 @@ def delete_person(family_id: str, person_id: str):
 
 @app.post("/api/families/{family_id}/relationships", status_code=201)
 def create_relationship(family_id: str, payload: RelationshipCreate) -> dict[str, Any]:
-    assert_family(family_id)
+    db_path = assert_family(family_id)
     if payload.source == payload.target:
         raise HTTPException(status_code=400, detail="关系两端不能是同一人物")
 
-    with connect() as connection:
+    with connect(db_path) as connection:
         assert_person_exists(connection, payload.source)
         assert_person_exists(connection, payload.target)
         try:
@@ -543,8 +578,8 @@ def create_relationship(family_id: str, payload: RelationshipCreate) -> dict[str
 
 @app.delete("/api/families/{family_id}/relationships/{relationship_id}", status_code=204, response_class=Response)
 def delete_relationship(family_id: str, relationship_id: int):
-    assert_family(family_id)
-    with connect() as connection:
+    db_path = assert_family(family_id)
+    with connect(db_path) as connection:
         cursor = connection.execute("DELETE FROM relationships WHERE id = ?", (relationship_id,))
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="关系不存在")
@@ -553,9 +588,9 @@ def delete_relationship(family_id: str, relationship_id: int):
 
 @app.post("/api/families/{family_id}/events", status_code=201)
 def create_event(family_id: str, payload: EventCreate) -> dict[str, Any]:
-    assert_family(family_id)
+    db_path = assert_family(family_id)
     event_id = f"e-{uuid4().hex[:8]}"
-    with connect() as connection:
+    with connect(db_path) as connection:
         assert_person_exists(connection, payload.person_id)
         connection.execute(
             "INSERT INTO events(id, person_id, year, title) VALUES (?, ?, ?, ?)",
@@ -567,8 +602,8 @@ def create_event(family_id: str, payload: EventCreate) -> dict[str, Any]:
 
 @app.delete("/api/families/{family_id}/events/{event_id}", status_code=204, response_class=Response)
 def delete_event(family_id: str, event_id: str):
-    assert_family(family_id)
-    with connect() as connection:
+    db_path = assert_family(family_id)
+    with connect(db_path) as connection:
         cursor = connection.execute("DELETE FROM events WHERE id = ?", (event_id,))
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="事件不存在")
@@ -577,9 +612,9 @@ def delete_event(family_id: str, event_id: str):
 
 @app.post("/api/families/{family_id}/archives", status_code=201)
 def create_archive(family_id: str, payload: ArchiveCreate) -> dict[str, Any]:
-    assert_family(family_id)
+    db_path = assert_family(family_id)
     archive_id = f"a-{uuid4().hex[:8]}"
-    with connect() as connection:
+    with connect(db_path) as connection:
         assert_person_exists(connection, payload.person_id)
         connection.execute(
             "INSERT INTO archives(id, person_id, type, title, source) VALUES (?, ?, ?, ?, ?)",
@@ -608,7 +643,7 @@ def upload_archive(
     source: str = Form(min_length=1, max_length=80),
     file: UploadFile = File(),
 ) -> dict[str, Any]:
-    assert_family(family_id)
+    db_path = assert_family(family_id)
     archive_id = f"a-{uuid4().hex[:8]}"
     file_name = safe_upload_name(file.filename or "")
     file_path = f"{family_id}/{archive_id}-{file_name}"
@@ -617,7 +652,7 @@ def upload_archive(
         raise HTTPException(status_code=400, detail="上传文件不能为空")
     target_path = UPLOAD_DIR / file_path
 
-    with connect() as connection:
+    with connect(db_path) as connection:
         assert_person_exists(connection, person_id)
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_bytes(content)
@@ -655,8 +690,8 @@ def upload_archive(
 
 @app.delete("/api/families/{family_id}/archives/{archive_id}", status_code=204, response_class=Response)
 def delete_archive(family_id: str, archive_id: str):
-    assert_family(family_id)
-    with connect() as connection:
+    db_path = assert_family(family_id)
+    with connect(db_path) as connection:
         archive = connection.execute("SELECT file_path FROM archives WHERE id = ?", (archive_id,)).fetchone()
         cursor = connection.execute("DELETE FROM archives WHERE id = ?", (archive_id,))
         if cursor.rowcount == 0:

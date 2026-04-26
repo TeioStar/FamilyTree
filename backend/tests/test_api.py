@@ -1,9 +1,11 @@
 from fastapi.testclient import TestClient
+from pathlib import Path
 
 from app.main import app
 
 
 client = TestClient(app)
+BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 
 def test_graph_contains_seed_family():
@@ -82,6 +84,48 @@ def test_import_family_rejects_wrong_family_id():
     response = client.post("/api/families/shen-wuxian/import", json=export_payload)
 
     assert response.status_code == 400
+
+
+def test_create_family_library_and_write_independent_graph():
+    family_id = "test-multi-family"
+    for suffix in ("", "-wal", "-shm"):
+        (BACKEND_DIR / "data" / "families" / f"{family_id}.ftree.db{suffix}").unlink(missing_ok=True)
+
+    create_response = client.post(
+        "/api/families",
+        json={"id": family_id, "name": "测试多家谱", "role": "creator", "status": "draft"},
+    )
+
+    assert create_response.status_code == 201
+    families = client.get("/api/families").json()
+    assert any(family["id"] == family_id and family["name"] == "测试多家谱" for family in families)
+
+    new_graph = client.get(f"/api/families/{family_id}/graph").json()
+    assert new_graph["familyId"] == family_id
+    assert new_graph["persons"] == []
+
+    person_response = client.post(
+        f"/api/families/{family_id}/persons",
+        json={
+            "name": "新谱首录",
+            "generation": "首",
+            "branch": "始迁支",
+            "years": "2000-2026",
+            "summary": "新家谱库中的独立人物",
+            "gender": "unknown",
+            "birth_place": "",
+            "death_place": "",
+            "rank": "首录",
+            "burial_place": "",
+            "confidence": "待校",
+        },
+    )
+
+    assert person_response.status_code == 201
+    default_graph = client.get("/api/families/shen-wuxian/graph").json()
+    assert all(person["name"] != "新谱首录" for person in default_graph["persons"])
+    created_graph = client.get(f"/api/families/{family_id}/graph").json()
+    assert any(person["name"] == "新谱首录" for person in created_graph["persons"])
 
 
 def test_create_person_persists_to_family_database():

@@ -83,6 +83,94 @@ def connect(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     return connection
 
 
+def family_db_path(family_id: str) -> Path:
+    return FAMILY_DB_DIR / f"{family_id}.ftree.db"
+
+
+def initialize_empty_family(family_id: str, name: str, role: str = "creator", status: str = "draft") -> None:
+    with connect(family_db_path(family_id)) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS persons (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                generation TEXT NOT NULL,
+                branch TEXT NOT NULL,
+                years TEXT NOT NULL,
+                x INTEGER NOT NULL,
+                y INTEGER NOT NULL,
+                summary TEXT NOT NULL,
+                gender TEXT NOT NULL DEFAULT 'unknown',
+                birth_place TEXT NOT NULL DEFAULT '',
+                death_place TEXT NOT NULL DEFAULT '',
+                rank TEXT NOT NULL DEFAULT '',
+                burial_place TEXT NOT NULL DEFAULT '',
+                confidence TEXT NOT NULL DEFAULT '待校'
+            );
+
+            CREATE TABLE IF NOT EXISTS relationships (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                type TEXT NOT NULL,
+                source TEXT NOT NULL,
+                target TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS events (
+                id TEXT PRIMARY KEY,
+                person_id TEXT NOT NULL,
+                year INTEGER NOT NULL,
+                title TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS archives (
+                id TEXT PRIMARY KEY,
+                person_id TEXT NOT NULL,
+                type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                source TEXT NOT NULL,
+                file_name TEXT NOT NULL DEFAULT '',
+                file_path TEXT NOT NULL DEFAULT '',
+                file_size INTEGER NOT NULL DEFAULT 0,
+                mime_type TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id TEXT PRIMARY KEY,
+                actor TEXT NOT NULL,
+                action TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            """
+        )
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_relationship_unique ON relationships(type, source, target)"
+        )
+        connection.executemany(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+            [
+                ("family_id", family_id),
+                ("name", name),
+                ("role", role),
+                ("status", status),
+            ],
+        )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO audit_logs(id, actor, action, entity_type, entity_id, summary)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("family-created", "system", "create", "family", family_id, f"创建家谱库：{name}"),
+        )
+
+
 def initialize_default_family() -> None:
     with connect() as connection:
         connection.executescript(

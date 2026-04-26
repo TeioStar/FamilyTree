@@ -140,9 +140,23 @@ h2 {
   gap: 8px;
 }
 
+.family-card.is-active {
+  border-color: var(--cinnabar);
+  box-shadow: inset 4px 0 0 var(--cinnabar);
+}
+
 .family-card strong,
 .metric-card b {
   color: var(--cinnabar);
+}
+
+.family-form {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0;
+  border: 1px solid rgba(111, 74, 45, 0.24);
+  background: rgba(246, 239, 217, 0.52);
+  padding: 14px;
 }
 
 .metric-grid {
