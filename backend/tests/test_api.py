@@ -128,6 +128,21 @@ def test_create_family_library_and_write_independent_graph():
     assert any(person["name"] == "新谱首录" for person in created_graph["persons"])
 
 
+def test_search_indexes_people_events_and_archives():
+    person_response = client.get("/api/families/shen-wuxian/search", params={"q": "沈怀远"})
+    assert person_response.status_code == 200
+    person_results = person_response.json()["results"]
+    assert any(result["type"] == "person" and result["id"] == "p1" for result in person_results)
+
+    event_response = client.get("/api/families/shen-wuxian/search", params={"q": "立谱"})
+    assert event_response.status_code == 200
+    assert any(result["type"] == "event" and result["personId"] == "p3" for result in event_response.json()["results"])
+
+    archive_response = client.get("/api/families/shen-wuxian/search", params={"q": "手稿"})
+    assert archive_response.status_code == 200
+    assert any(result["type"] == "archive" and result["personId"] == "p7" for result in archive_response.json()["results"])
+
+
 def test_create_person_persists_to_family_database():
     response = client.post(
         "/api/families/shen-wuxian/persons",

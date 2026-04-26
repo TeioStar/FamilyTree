@@ -10,6 +10,7 @@ const timelineCurrentYear = document.querySelector("#timelineCurrentYear");
 const timelineEvents = document.querySelector("#timelineEvents");
 const searchInput = document.querySelector("#searchInput");
 const searchButton = document.querySelector("#searchButton");
+const searchResults = document.querySelector("#searchResults");
 const branchFilter = document.querySelector("#branchFilter");
 const zoomInButton = document.querySelector("#zoomInButton");
 const zoomOutButton = document.querySelector("#zoomOutButton");
@@ -71,6 +72,11 @@ const archiveTypeLabels = {
   oral: "口述记录",
   contract: "契据",
   other: "其他",
+};
+const searchTypeLabels = {
+  person: "人物",
+  event: "纪事",
+  archive: "资料",
 };
 const genderLabels = {
   male: "男",
@@ -479,19 +485,41 @@ function applyZoom() {
   );
 }
 
-function searchPerson() {
+function renderSearchResults(results, keyword) {
+  if (!keyword) {
+    searchResults.innerHTML = "";
+    return;
+  }
+
+  searchResults.innerHTML = `
+    <strong>搜索索引</strong>
+    <span>${results.length ? `找到 ${results.length} 条结果` : "暂无匹配结果"}</span>
+    <div class="search-result-list">
+      ${results.map((result) => `
+        <button type="button" data-person-id="${result.personId}">
+          <b>${searchTypeLabels[result.type] || result.type} · ${result.title}</b>
+          <span>${result.subtitle}</span>
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
+async function searchPerson() {
   const keyword = searchInput.value.trim();
   if (!keyword) return;
-  const person = graph.persons.find((item) =>
-    item.name.includes(keyword) || item.generation.includes(keyword) || item.branch.includes(keyword)
-  );
-  if (person) {
-    if (branchFilter.value !== "all" && person.branch !== branchFilter.value) {
+  const data = await api(`/api/families/${familyId}/search?q=${encodeURIComponent(keyword)}`);
+  renderSearchResults(data.results, keyword);
+  systemStatus.textContent = `搜索完成：找到 ${data.results.length} 条索引结果`;
+  const firstResult = data.results[0];
+  if (firstResult?.personId) {
+    const person = personById.get(firstResult.personId);
+    if (person && branchFilter.value !== "all" && person.branch !== branchFilter.value) {
       branchFilter.value = "all";
       renderTree();
     }
-    selectPerson(person.id);
-    document.querySelector(`.person-node[data-person-id="${person.id}"]`)?.focus();
+    selectPerson(firstResult.personId);
+    document.querySelector(`.person-node[data-person-id="${firstResult.personId}"]`)?.focus();
   }
 }
 
@@ -801,7 +829,23 @@ async function boot() {
   systemStatus.textContent = "系统已连接后端 API，可读写 SQLite 家谱文件。";
 }
 
-searchButton.addEventListener("click", searchPerson);
+searchButton.addEventListener("click", () => {
+  searchPerson().catch((error) => {
+    systemStatus.textContent = "搜索失败，请检查后端服务。";
+    console.error(error);
+  });
+});
+searchResults.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-person-id]");
+  if (!button) return;
+
+  if (branchFilter.value !== "all") {
+    branchFilter.value = "all";
+    renderTree();
+  }
+  selectPerson(button.dataset.personId);
+  document.querySelector(`.person-node[data-person-id="${button.dataset.personId}"]`)?.focus();
+});
 familyForm.addEventListener("submit", (event) => {
   createFamily(event).catch((error) => {
     systemStatus.textContent = "创建家谱失败，请确认英文标识未重复。";
@@ -820,7 +864,10 @@ familyList.addEventListener("click", (event) => {
 searchInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
-    searchPerson();
+    searchPerson().catch((error) => {
+      systemStatus.textContent = "搜索失败，请检查后端服务。";
+      console.error(error);
+    });
   }
 });
 branchFilter.addEventListener("change", () => {

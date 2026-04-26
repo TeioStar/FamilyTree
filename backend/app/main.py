@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -269,6 +269,82 @@ def create_family(payload: FamilyCreate) -> dict[str, Any]:
         "status": payload.status,
         "stats": {"persons": 0, "relationships": 0, "events": 0, "archives": 0, "completeness": 0},
     }
+
+
+@app.get("/api/families/{family_id}/search")
+def search_family(family_id: str, q: str = Query(min_length=1, max_length=80)) -> dict[str, Any]:
+    db_path = assert_family(family_id)
+    keyword = f"%{q.strip()}%"
+    with connect(db_path) as connection:
+        people = rows_to_dicts(
+            connection.execute(
+                """
+                SELECT
+                    'person' AS type,
+                    id,
+                    id AS personId,
+                    name AS title,
+                    branch || ' · ' || generation || ' · ' || years AS subtitle
+                FROM persons
+                WHERE
+                    name LIKE ?
+                    OR generation LIKE ?
+                    OR branch LIKE ?
+                    OR years LIKE ?
+                    OR summary LIKE ?
+                    OR birth_place LIKE ?
+                    OR death_place LIKE ?
+                    OR rank LIKE ?
+                    OR burial_place LIKE ?
+                    OR confidence LIKE ?
+                ORDER BY y, x
+                LIMIT 20
+                """,
+                (keyword, keyword, keyword, keyword, keyword, keyword, keyword, keyword, keyword, keyword),
+            ).fetchall()
+        )
+        events = rows_to_dicts(
+            connection.execute(
+                """
+                SELECT
+                    'event' AS type,
+                    events.id,
+                    events.person_id AS personId,
+                    events.title,
+                    persons.name || ' · ' || events.year || ' 年' AS subtitle
+                FROM events
+                JOIN persons ON persons.id = events.person_id
+                WHERE events.title LIKE ? OR CAST(events.year AS TEXT) LIKE ? OR persons.name LIKE ?
+                ORDER BY events.year
+                LIMIT 20
+                """,
+                (keyword, keyword, keyword),
+            ).fetchall()
+        )
+        archives = rows_to_dicts(
+            connection.execute(
+                """
+                SELECT
+                    'archive' AS type,
+                    archives.id,
+                    archives.person_id AS personId,
+                    archives.title,
+                    persons.name || ' · ' || archives.source AS subtitle
+                FROM archives
+                JOIN persons ON persons.id = archives.person_id
+                WHERE
+                    archives.title LIKE ?
+                    OR archives.source LIKE ?
+                    OR archives.file_name LIKE ?
+                    OR persons.name LIKE ?
+                ORDER BY archives.title
+                LIMIT 20
+                """,
+                (keyword, keyword, keyword, keyword),
+            ).fetchall()
+        )
+
+    return {"familyId": family_id, "q": q, "results": [*people, *events, *archives]}
 
 
 @app.get("/api/families/{family_id}/graph")
