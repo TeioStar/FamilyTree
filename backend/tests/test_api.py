@@ -18,6 +18,21 @@ def test_graph_contains_seed_family():
     assert any(log["entityType"] == "family" for log in data["auditLogs"])
 
 
+def test_export_family_contains_complete_archive_payload():
+    response = client.get("/api/families/shen-wuxian/export")
+
+    assert response.status_code == 200
+    assert "shen-wuxian-familytree-export.json" in response.headers["content-disposition"]
+    data = response.json()
+    assert data["schemaVersion"] == 1
+    assert data["family"]["id"] == "shen-wuxian"
+    assert len(data["data"]["persons"]) >= 12
+    assert data["data"]["relationships"]
+    assert data["data"]["events"]
+    assert data["data"]["archives"]
+    assert data["data"]["auditLogs"]
+
+
 def test_create_person_persists_to_family_database():
     response = client.post(
         "/api/families/shen-wuxian/persons",

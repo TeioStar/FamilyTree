@@ -9,6 +9,7 @@ const searchButton = document.querySelector("#searchButton");
 const zoomInButton = document.querySelector("#zoomInButton");
 const zoomOutButton = document.querySelector("#zoomOutButton");
 const resetButton = document.querySelector("#resetButton");
+const exportButton = document.querySelector("#exportButton");
 const selectedName = document.querySelector("#selectedName");
 const systemStatus = document.querySelector("#systemStatus");
 const personForm = document.querySelector("#personForm");
@@ -557,6 +558,24 @@ async function loadGraph() {
   renderTree();
 }
 
+async function exportFamily() {
+  const response = await fetch(`/api/families/${familyId}/export`);
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  const blob = await response.blob();
+  const downloadUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = downloadUrl;
+  anchor.download = `${familyId}-familytree-export.json`;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(downloadUrl);
+  systemStatus.textContent = "家谱 JSON 备份已生成，可用于迁移与归档。";
+}
+
 async function boot() {
   const families = await api("/api/families");
   renderFamilies(families);
@@ -582,6 +601,12 @@ zoomOutButton.addEventListener("click", () => {
 resetButton.addEventListener("click", () => {
   zoom = 1;
   applyZoom();
+});
+exportButton.addEventListener("click", () => {
+  exportFamily().catch((error) => {
+    systemStatus.textContent = "导出失败，请检查后端服务。";
+    console.error(error);
+  });
 });
 timelineYear.addEventListener("input", updateTimeline);
 personForm.addEventListener("submit", savePerson);

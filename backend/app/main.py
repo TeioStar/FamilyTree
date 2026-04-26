@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Response
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -159,6 +161,30 @@ def get_graph(family_id: str) -> dict[str, Any]:
         "archives": archives,
         "auditLogs": audit_logs,
     }
+
+
+@app.get("/api/families/{family_id}/export")
+def export_family(family_id: str) -> JSONResponse:
+    assert_family(family_id)
+    graph = get_graph(family_id)
+    with connect() as connection:
+        meta = {row["key"]: row["value"] for row in connection.execute("SELECT key, value FROM meta")}
+
+    payload = {
+        "schemaVersion": 1,
+        "exportedAt": date.today().isoformat(),
+        "family": {
+            "id": meta["family_id"],
+            "name": meta["name"],
+            "role": meta["role"],
+            "status": meta["status"],
+        },
+        "data": graph,
+    }
+    return JSONResponse(
+        payload,
+        headers={"Content-Disposition": f'attachment; filename="{family_id}-familytree-export.json"'},
+    )
 
 
 @app.post("/api/families/{family_id}/persons", status_code=201)
