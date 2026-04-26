@@ -81,6 +81,16 @@ def assert_person_exists(connection, person_id: str) -> None:
         raise HTTPException(status_code=404, detail="人物不存在")
 
 
+def record_audit(connection, action: str, entity_type: str, entity_id: str, summary: str) -> None:
+    connection.execute(
+        """
+        INSERT INTO audit_logs(id, actor, action, entity_type, entity_id, summary)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (f"log-{uuid4().hex[:10]}", "creator", action, entity_type, entity_id, summary),
+    )
+
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -124,12 +134,30 @@ def get_graph(family_id: str) -> dict[str, Any]:
                 "SELECT id, person_id AS personId, type, title, source FROM archives ORDER BY title"
             ).fetchall()
         )
+        audit_logs = rows_to_dicts(
+            connection.execute(
+                """
+                SELECT
+                    id,
+                    actor,
+                    action,
+                    entity_type AS entityType,
+                    entity_id AS entityId,
+                    summary,
+                    created_at AS createdAt
+                FROM audit_logs
+                ORDER BY created_at DESC, id DESC
+                LIMIT 30
+                """
+            ).fetchall()
+        )
     return {
         "familyId": family_id,
         "persons": persons,
         "relationships": relationships,
         "events": events,
         "archives": archives,
+        "auditLogs": audit_logs,
     }
 
 
@@ -146,6 +174,7 @@ def create_person(family_id: str, payload: PersonCreate) -> dict[str, Any]:
             """,
             (person_id, payload.name, payload.generation, payload.branch, payload.years, x, y, payload.summary),
         )
+        record_audit(connection, "create", "person", person_id, f"新增人物：{payload.name}")
     return {"id": person_id, **payload.model_dump(), "x": x, "y": y}
 
 
@@ -163,6 +192,7 @@ def update_person(family_id: str, person_id: str, payload: PersonUpdate) -> dict
         )
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="人物不存在")
+        record_audit(connection, "update", "person", person_id, f"更新人物：{payload.name}")
     return {"id": person_id, **payload.model_dump()}
 
 
@@ -176,6 +206,7 @@ def delete_person(family_id: str, person_id: str):
         connection.execute("DELETE FROM relationships WHERE source = ? OR target = ?", (person_id, person_id))
         connection.execute("DELETE FROM events WHERE person_id = ?", (person_id,))
         connection.execute("DELETE FROM archives WHERE person_id = ?", (person_id,))
+        record_audit(connection, "delete", "person", person_id, f"删除人物：{person_id}")
 
 
 @app.post("/api/families/{family_id}/relationships", status_code=201)
@@ -196,6 +227,13 @@ def create_relationship(family_id: str, payload: RelationshipCreate) -> dict[str
             if "UNIQUE" in str(exc).upper():
                 raise HTTPException(status_code=409, detail="关系已存在") from exc
             raise
+        record_audit(
+            connection,
+            "create",
+            "relationship",
+            str(cursor.lastrowid),
+            f"新增关系：{payload.source} -> {payload.target}",
+        )
 
     return {"id": cursor.lastrowid, **payload.model_dump()}
 
@@ -207,6 +245,7 @@ def delete_relationship(family_id: str, relationship_id: int):
         cursor = connection.execute("DELETE FROM relationships WHERE id = ?", (relationship_id,))
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="关系不存在")
+        record_audit(connection, "delete", "relationship", str(relationship_id), f"删除关系：{relationship_id}")
 
 
 @app.post("/api/families/{family_id}/events", status_code=201)
@@ -219,6 +258,7 @@ def create_event(family_id: str, payload: EventCreate) -> dict[str, Any]:
             "INSERT INTO events(id, person_id, year, title) VALUES (?, ?, ?, ?)",
             (event_id, payload.person_id, payload.year, payload.title),
         )
+        record_audit(connection, "create", "event", event_id, f"新增事件：{payload.title}")
     return {"id": event_id, "personId": payload.person_id, "year": payload.year, "title": payload.title}
 
 
@@ -229,6 +269,7 @@ def delete_event(family_id: str, event_id: str):
         cursor = connection.execute("DELETE FROM events WHERE id = ?", (event_id,))
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="事件不存在")
+        record_audit(connection, "delete", "event", event_id, f"删除事件：{event_id}")
 
 
 @app.post("/api/families/{family_id}/archives", status_code=201)
@@ -241,6 +282,7 @@ def create_archive(family_id: str, payload: ArchiveCreate) -> dict[str, Any]:
             "INSERT INTO archives(id, person_id, type, title, source) VALUES (?, ?, ?, ?, ?)",
             (archive_id, payload.person_id, payload.type, payload.title, payload.source),
         )
+        record_audit(connection, "create", "archive", archive_id, f"新增资料：{payload.title}")
     return {
         "id": archive_id,
         "personId": payload.person_id,
@@ -257,6 +299,7 @@ def delete_archive(family_id: str, archive_id: str):
         cursor = connection.execute("DELETE FROM archives WHERE id = ?", (archive_id,))
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="资料不存在")
+        record_audit(connection, "delete", "archive", archive_id, f"删除资料：{archive_id}")
 
 
 frontend_dir = ROOT_DIR / "frontend"

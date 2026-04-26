@@ -74,6 +74,7 @@
             <button data-tab="relationship" type="button">关系</button>
             <button data-tab="event" type="button">事件</button>
             <button data-tab="archive" type="button">资料</button>
+            <button data-tab="audit" type="button">审计</button>
           </div>
 
           <form id="personForm" class="management-grid management-pane is-active" data-pane="person">
@@ -128,6 +129,13 @@
             </div>
           </form>
 
+          <section id="auditPane" class="management-pane audit-pane" data-pane="audit">
+            <div>
+              <strong>最近操作</strong>
+              <p>记录人物、关系、事件与资料的写入、修改和删除。</p>
+            </div>
+          </section>
+
           <section class="records-panel" aria-label="数据清单">
             <div>
               <h3>人物清单</h3>
@@ -144,6 +152,10 @@
             <div>
               <h3>资料列表</h3>
               <div id="archiveRecords" class="record-list"></div>
+            </div>
+            <div>
+              <h3>审计日志</h3>
+              <div id="auditRecords" class="record-list"></div>
             </div>
           </section>
         </section>

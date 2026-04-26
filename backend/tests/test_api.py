@@ -15,6 +15,7 @@ def test_graph_contains_seed_family():
     assert any(person["name"] == "沈怀远" for person in data["persons"])
     assert any(edge["type"] == "spouse" for edge in data["relationships"])
     assert any(archive["type"] == "manuscript" for archive in data["archives"])
+    assert any(log["entityType"] == "family" for log in data["auditLogs"])
 
 
 def test_create_person_persists_to_family_database():
@@ -34,6 +35,24 @@ def test_create_person_persists_to_family_database():
 
     graph = client.get("/api/families/shen-wuxian/graph").json()
     assert any(person["id"] == person_id and person["name"] == "沈新录" for person in graph["persons"])
+    assert any(log["action"] == "create" and log["entityId"] == person_id for log in graph["auditLogs"])
+
+
+def test_update_person_records_audit_log():
+    response = client.put(
+        "/api/families/shen-wuxian/persons/p1",
+        json={
+            "name": "沈怀远",
+            "generation": "怀",
+            "branch": "宗祖",
+            "years": "1841-1912",
+            "summary": "族谱主干人物，主持修谱与校订。",
+        },
+    )
+
+    assert response.status_code == 200
+    graph = client.get("/api/families/shen-wuxian/graph").json()
+    assert any(log["action"] == "update" and log["entityId"] == "p1" for log in graph["auditLogs"])
 
 
 def test_create_relationship_rejects_self_reference():
@@ -71,6 +90,8 @@ def test_create_and_delete_relationship():
 
     delete_response = client.delete(f"/api/families/shen-wuxian/relationships/{relationship_id}")
     assert delete_response.status_code == 204
+    graph = client.get("/api/families/shen-wuxian/graph").json()
+    assert any(log["action"] == "delete" and log["entityType"] == "relationship" for log in graph["auditLogs"])
 
 
 def test_create_and_delete_event():
@@ -87,6 +108,8 @@ def test_create_and_delete_event():
 
     delete_response = client.delete(f"/api/families/shen-wuxian/events/{event_id}")
     assert delete_response.status_code == 204
+    graph = client.get("/api/families/shen-wuxian/graph").json()
+    assert any(log["action"] == "delete" and log["entityId"] == event_id for log in graph["auditLogs"])
 
 
 def test_create_and_delete_archive():
@@ -108,6 +131,8 @@ def test_create_and_delete_archive():
 
     delete_response = client.delete(f"/api/families/shen-wuxian/archives/{archive_id}")
     assert delete_response.status_code == 204
+    graph = client.get("/api/families/shen-wuxian/graph").json()
+    assert any(log["action"] == "delete" and log["entityId"] == archive_id for log in graph["auditLogs"])
 
 
 def test_delete_person_removes_related_archives():

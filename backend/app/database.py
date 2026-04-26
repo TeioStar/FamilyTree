@@ -54,6 +54,10 @@ ARCHIVE_SEED = [
     ("a2", "p10", "photo", "二房合影照片", "照片"),
 ]
 
+AUDIT_SEED = [
+    ("seed-archive", "system", "seed", "family", DEFAULT_FAMILY_ID, "初始化默认家谱与资料索引", "2026-04-26 00:00:00"),
+]
+
 
 def connect(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -105,6 +109,16 @@ def initialize_default_family() -> None:
                 title TEXT NOT NULL,
                 source TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id TEXT PRIMARY KEY,
+                actor TEXT NOT NULL,
+                action TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
         connection.execute(
@@ -148,6 +162,13 @@ def initialize_default_family() -> None:
         connection.executemany(
             "INSERT OR IGNORE INTO archives(id, person_id, type, title, source) VALUES (?, ?, ?, ?, ?)",
             ARCHIVE_SEED,
+        )
+        connection.executemany(
+            """
+            INSERT OR IGNORE INTO audit_logs(id, actor, action, entity_type, entity_id, summary, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            AUDIT_SEED,
         )
 
 

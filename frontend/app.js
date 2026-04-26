@@ -20,6 +20,7 @@ const personRecords = document.querySelector("#personRecords");
 const relationshipRecords = document.querySelector("#relationshipRecords");
 const eventRecords = document.querySelector("#eventRecords");
 const archiveRecords = document.querySelector("#archiveRecords");
+const auditRecords = document.querySelector("#auditRecords");
 const tabButtons = document.querySelectorAll("[data-tab]");
 const panes = document.querySelectorAll("[data-pane]");
 const personName = document.querySelector("#personName");
@@ -56,7 +57,20 @@ const archiveTypeLabels = {
   contract: "契据",
   other: "其他",
 };
-let graph = { persons: [], relationships: [], events: [], archives: [] };
+let graph = { persons: [], relationships: [], events: [], archives: [], auditLogs: [] };
+const auditActionLabels = {
+  create: "新增",
+  update: "更新",
+  delete: "删除",
+  seed: "初始化",
+};
+const auditEntityLabels = {
+  family: "家谱",
+  person: "人物",
+  relationship: "关系",
+  event: "事件",
+  archive: "资料",
+};
 let personById = new Map();
 let selectedPersonId = null;
 let zoom = 1;
@@ -224,6 +238,7 @@ function renderRecords() {
   relationshipRecords.innerHTML = "";
   eventRecords.innerHTML = "";
   archiveRecords.innerHTML = "";
+  auditRecords.innerHTML = "";
 
   graph.persons.forEach((person) => {
     appendRecord(personRecords, {
@@ -261,6 +276,14 @@ function renderRecords() {
       title: archive.title,
       meta: `${archiveTypeLabels[archive.type] || archive.type} · ${archive.source} · ${person ? person.name : "未关联人物"}`,
       actions: [{ label: "删除", action: "delete-archive", id: archive.id }],
+    });
+  });
+
+  graph.auditLogs.forEach((log) => {
+    appendRecord(auditRecords, {
+      title: `${auditActionLabels[log.action] || log.action} · ${auditEntityLabels[log.entityType] || log.entityType}`,
+      meta: `${log.summary} · ${log.actor} · ${log.createdAt}`,
+      actions: [],
     });
   });
 }
