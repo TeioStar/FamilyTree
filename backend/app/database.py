@@ -128,7 +128,11 @@ def initialize_default_family() -> None:
                 person_id TEXT NOT NULL,
                 type TEXT NOT NULL,
                 title TEXT NOT NULL,
-                source TEXT NOT NULL
+                source TEXT NOT NULL,
+                file_name TEXT NOT NULL DEFAULT '',
+                file_path TEXT NOT NULL DEFAULT '',
+                file_size INTEGER NOT NULL DEFAULT 0,
+                mime_type TEXT NOT NULL DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS audit_logs (
@@ -157,6 +161,21 @@ def initialize_default_family() -> None:
             if column_name not in person_columns:
                 connection.execute(
                     f"ALTER TABLE persons ADD COLUMN {column_name} TEXT NOT NULL DEFAULT {default_value}"
+                )
+        archive_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(archives)").fetchall()
+        }
+        archive_column_defaults = {
+            "file_name": "''",
+            "file_path": "''",
+            "file_size": "0",
+            "mime_type": "''",
+        }
+        for column_name, default_value in archive_column_defaults.items():
+            if column_name not in archive_columns:
+                column_type = "INTEGER" if column_name == "file_size" else "TEXT"
+                connection.execute(
+                    f"ALTER TABLE archives ADD COLUMN {column_name} {column_type} NOT NULL DEFAULT {default_value}"
                 )
         connection.execute(
             """

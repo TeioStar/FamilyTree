@@ -6,13 +6,16 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .database import DEFAULT_FAMILY_ID, ROOT_DIR, connect, initialize_default_family, rows_to_dicts
+
+
+UPLOAD_DIR = ROOT_DIR / "backend" / "data" / "uploads"
 
 
 class PersonCreate(BaseModel):
@@ -106,6 +109,10 @@ class ArchiveImport(BaseModel):
     type: str = Field(pattern=r"^(manuscript|photo|epitaph|oral|contract|other)$")
     title: str = Field(min_length=1, max_length=80)
     source: str = Field(min_length=1, max_length=80)
+    fileName: str = Field(default="", max_length=120)
+    fileUrl: str = Field(default="", max_length=240)
+    fileSize: int = Field(default=0, ge=0)
+    mimeType: str = Field(default="", max_length=120)
 
 
 class AuditLogImport(BaseModel):
@@ -175,6 +182,16 @@ def record_audit(connection, action: str, entity_type: str, entity_id: str, summ
     )
 
 
+def archive_file_url(file_path: str) -> str:
+    return f"/uploads/{file_path}" if file_path else ""
+
+
+def safe_upload_name(filename: str) -> str:
+    original_name = Path(filename or "archive.bin").name
+    safe_name = "".join(char if char.isalnum() or char in ".-_" else "_" for char in original_name)
+    return safe_name.strip("._") or "archive.bin"
+
+
 def validate_import_references(payload: FamilyImportPayload) -> None:
     person_ids = {person.id for person in payload.data.persons}
     for relationship in payload.data.relationships:
@@ -228,7 +245,20 @@ def get_graph(family_id: str) -> dict[str, Any]:
         events = rows_to_dicts(connection.execute("SELECT id, person_id AS personId, year, title FROM events ORDER BY year").fetchall())
         archives = rows_to_dicts(
             connection.execute(
-                "SELECT id, person_id AS personId, type, title, source FROM archives ORDER BY title"
+                """
+                SELECT
+                    id,
+                    person_id AS personId,
+                    type,
+                    title,
+                    source,
+                    file_name AS fileName,
+                    CASE WHEN file_path = '' THEN '' ELSE '/uploads/' || file_path END AS fileUrl,
+                    file_size AS fileSize,
+                    mime_type AS mimeType
+                FROM archives
+                ORDER BY title
+                """
             ).fetchall()
         )
         audit_logs = rows_to_dicts(
@@ -342,8 +372,26 @@ def import_family(family_id: str, payload: FamilyImportPayload) -> dict[str, Any
             [(event.id, event.personId, event.year, event.title) for event in payload.data.events],
         )
         connection.executemany(
-            "INSERT INTO archives(id, person_id, type, title, source) VALUES (?, ?, ?, ?, ?)",
-            [(archive.id, archive.personId, archive.type, archive.title, archive.source) for archive in payload.data.archives],
+            """
+            INSERT INTO archives(
+                id, person_id, type, title, source, file_name, file_path, file_size, mime_type
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    archive.id,
+                    archive.personId,
+                    archive.type,
+                    archive.title,
+                    archive.source,
+                    archive.fileName,
+                    archive.fileUrl.removeprefix("/uploads/"),
+                    archive.fileSize,
+                    archive.mimeType,
+                )
+                for archive in payload.data.archives
+            ],
         )
         connection.executemany(
             """
@@ -544,6 +592,64 @@ def create_archive(family_id: str, payload: ArchiveCreate) -> dict[str, Any]:
         "type": payload.type,
         "title": payload.title,
         "source": payload.source,
+        "fileName": "",
+        "fileUrl": "",
+        "fileSize": 0,
+        "mimeType": "",
+    }
+
+
+@app.post("/api/families/{family_id}/archives/upload", status_code=201)
+def upload_archive(
+    family_id: str,
+    person_id: str = Form(min_length=1, max_length=40),
+    type: str = Form(pattern=r"^(manuscript|photo|epitaph|oral|contract|other)$"),
+    title: str = Form(min_length=1, max_length=80),
+    source: str = Form(min_length=1, max_length=80),
+    file: UploadFile = File(),
+) -> dict[str, Any]:
+    assert_family(family_id)
+    archive_id = f"a-{uuid4().hex[:8]}"
+    file_name = safe_upload_name(file.filename or "")
+    file_path = f"{family_id}/{archive_id}-{file_name}"
+    content = file.file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="上传文件不能为空")
+    target_path = UPLOAD_DIR / file_path
+
+    with connect() as connection:
+        assert_person_exists(connection, person_id)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_bytes(content)
+        connection.execute(
+            """
+            INSERT INTO archives(id, person_id, type, title, source, file_name, file_path, file_size, mime_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                archive_id,
+                person_id,
+                type,
+                title,
+                source,
+                file_name,
+                file_path,
+                len(content),
+                file.content_type or "",
+            ),
+        )
+        record_audit(connection, "create", "archive", archive_id, f"上传资料：{title}")
+
+    return {
+        "id": archive_id,
+        "personId": person_id,
+        "type": type,
+        "title": title,
+        "source": source,
+        "fileName": file_name,
+        "fileUrl": archive_file_url(file_path),
+        "fileSize": len(content),
+        "mimeType": file.content_type or "",
     }
 
 
@@ -551,12 +657,19 @@ def create_archive(family_id: str, payload: ArchiveCreate) -> dict[str, Any]:
 def delete_archive(family_id: str, archive_id: str):
     assert_family(family_id)
     with connect() as connection:
+        archive = connection.execute("SELECT file_path FROM archives WHERE id = ?", (archive_id,)).fetchone()
         cursor = connection.execute("DELETE FROM archives WHERE id = ?", (archive_id,))
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="资料不存在")
+        if archive and archive["file_path"]:
+            upload_path = (UPLOAD_DIR / archive["file_path"]).resolve()
+            if UPLOAD_DIR.resolve() in upload_path.parents and upload_path.exists():
+                upload_path.unlink()
         record_audit(connection, "delete", "archive", archive_id, f"删除资料：{archive_id}")
 
 
 frontend_dir = ROOT_DIR / "frontend"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 if frontend_dir.exists():
     app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")

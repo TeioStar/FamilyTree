@@ -49,6 +49,7 @@ const archivePerson = document.querySelector("#archivePerson");
 const archiveType = document.querySelector("#archiveType");
 const archiveTitle = document.querySelector("#archiveTitle");
 const archiveSource = document.querySelector("#archiveSource");
+const archiveFile = document.querySelector("#archiveFile");
 
 const svgNamespace = "http://www.w3.org/2000/svg";
 const nodeWidth = 112;
@@ -314,10 +315,14 @@ function renderRecords() {
 
   graph.archives.forEach((archive) => {
     const person = personById.get(archive.personId);
+    const fileMeta = archive.fileName ? ` · ${archive.fileName}` : "";
     appendRecord(archiveRecords, {
       title: archive.title,
-      meta: `${archiveTypeLabels[archive.type] || archive.type} · ${archive.source} · ${person ? person.name : "未关联人物"}`,
-      actions: [{ label: "删除", action: "delete-archive", id: archive.id }],
+      meta: `${archiveTypeLabels[archive.type] || archive.type} · ${archive.source}${fileMeta} · ${person ? person.name : "未关联人物"}`,
+      actions: [
+        ...(archive.fileUrl ? [{ label: "查看", action: "open-archive", id: archive.id }] : []),
+        { label: "删除", action: "delete-archive", id: archive.id },
+      ],
     });
   });
 
@@ -407,7 +412,10 @@ function selectPerson(personId) {
     <h3>关键事件</h3>
     <ul>${personEvents.map((event) => `<li>${event.year} 年 ${event.title}</li>`).join("") || "<li>暂无事件</li>"}</ul>
     <h3>归档资料</h3>
-    <ul>${personArchives.map((archive) => `<li>${archiveTypeLabels[archive.type] || archive.type} · ${archive.title}</li>`).join("") || "<li>暂无资料</li>"}</ul>
+    <ul>${personArchives.map((archive) => {
+      const fileLink = archive.fileUrl ? ` · <a href="${archive.fileUrl}" target="_blank" rel="noreferrer">${archive.fileName}</a>` : "";
+      return `<li>${archiveTypeLabels[archive.type] || archive.type} · ${archive.title}${fileLink}</li>`;
+    }).join("") || "<li>暂无资料</li>"}</ul>
   `;
 
   selectedName.textContent = person.name;
@@ -429,6 +437,7 @@ function selectPerson(personId) {
   eventTitle.value = personEvents[0]?.title || "家族纪事待补录";
   archiveTitle.value = personArchives[0]?.title || "资料待归档";
   archiveSource.value = personArchives[0]?.source || "家族整理";
+  archiveFile.value = "";
   systemStatus.textContent = `已载入 ${person.name} 的人物档案`;
 }
 
@@ -448,6 +457,7 @@ function resetPersonEditor() {
   personSummary.value = "";
   archiveTitle.value = "资料待归档";
   archiveSource.value = "家族整理";
+  archiveFile.value = "";
   document.querySelectorAll(".person-node").forEach((node) => node.classList.remove("is-selected", "is-related", "is-dimmed"));
   document.querySelectorAll(".relationship-line").forEach((line) => line.classList.remove("is-related", "is-dimmed"));
   dossierPanel.innerHTML = `
@@ -557,6 +567,29 @@ async function saveEvent(event) {
 
 async function saveArchive(event) {
   event.preventDefault();
+  const [file] = archiveFile.files;
+  if (file) {
+    const formData = new FormData();
+    formData.append("person_id", archivePerson.value);
+    formData.append("type", archiveType.value);
+    formData.append("title", archiveTitle.value.trim());
+    formData.append("source", archiveSource.value.trim());
+    formData.append("file", file);
+
+    const response = await fetch(`/api/families/${familyId}/archives/upload`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    systemStatus.textContent = "资料文件已上传并归档，档案清单已刷新。";
+    archiveFile.value = "";
+    await loadGraph();
+    selectPerson(archivePerson.value);
+    return;
+  }
+
   const payload = {
     person_id: archivePerson.value,
     type: archiveType.value,
@@ -637,6 +670,12 @@ async function handleRecordAction(event) {
 
   if (action === "delete-archive") {
     await deleteArchive(id);
+    return;
+  }
+
+  if (action === "open-archive") {
+    const archive = graph.archives.find((item) => item.id === id);
+    if (archive?.fileUrl) window.open(archive.fileUrl, "_blank", "noreferrer");
   }
 }
 

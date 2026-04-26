@@ -219,6 +219,31 @@ def test_create_and_delete_archive():
     assert any(log["action"] == "delete" and log["entityId"] == archive_id for log in graph["auditLogs"])
 
 
+def test_upload_archive_file_creates_downloadable_archive():
+    response = client.post(
+        "/api/families/shen-wuxian/archives/upload",
+        data={
+            "person_id": "p1",
+            "type": "manuscript",
+            "title": "手稿扫描件",
+            "source": "家藏原件",
+        },
+        files={"file": ("scan.txt", b"archive file content", "text/plain")},
+    )
+
+    assert response.status_code == 201
+    archive = response.json()
+    assert archive["fileName"] == "scan.txt"
+    assert archive["fileSize"] == len(b"archive file content")
+    assert archive["mimeType"] == "text/plain"
+    assert archive["fileUrl"].startswith("/uploads/shen-wuxian/")
+
+    graph = client.get("/api/families/shen-wuxian/graph").json()
+    uploaded_archive = next(item for item in graph["archives"] if item["id"] == archive["id"])
+    assert uploaded_archive["fileName"] == "scan.txt"
+    assert uploaded_archive["fileUrl"] == archive["fileUrl"]
+
+
 def test_delete_person_removes_related_archives():
     person_response = client.post(
         "/api/families/shen-wuxian/persons",
