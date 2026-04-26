@@ -15,6 +15,9 @@ const personForm = document.querySelector("#personForm");
 const relationshipForm = document.querySelector("#relationshipForm");
 const eventForm = document.querySelector("#eventForm");
 const newPersonButton = document.querySelector("#newPersonButton");
+const personRecords = document.querySelector("#personRecords");
+const relationshipRecords = document.querySelector("#relationshipRecords");
+const eventRecords = document.querySelector("#eventRecords");
 const tabButtons = document.querySelectorAll("[data-tab]");
 const panes = document.querySelectorAll("[data-pane]");
 const personName = document.querySelector("#personName");
@@ -33,6 +36,12 @@ const svgNamespace = "http://www.w3.org/2000/svg";
 const nodeWidth = 112;
 const nodeHeight = 78;
 const familyId = "shen-wuxian";
+const relationshipTypeLabels = {
+  parent: "父母/子女",
+  spouse: "配偶",
+  adoptive: "收养",
+  collateral: "旁系",
+};
 let graph = { persons: [], relationships: [], events: [] };
 let personById = new Map();
 let selectedPersonId = null;
@@ -165,6 +174,68 @@ function renderTree() {
   renderPersonOptions();
   applyZoom();
   updateTimeline();
+  renderRecords();
+}
+
+function appendRecord(container, { title, meta, actions }) {
+  const item = document.createElement("article");
+  item.className = "record-item";
+
+  const body = document.createElement("div");
+  const name = document.createElement("strong");
+  const detail = document.createElement("span");
+  name.textContent = title;
+  detail.textContent = meta;
+  body.append(name, detail);
+
+  const actionGroup = document.createElement("div");
+  actions.forEach((action) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = action.label;
+    button.dataset.action = action.action;
+    button.dataset.id = action.id;
+    actionGroup.append(button);
+  });
+
+  item.append(body, actionGroup);
+  container.append(item);
+}
+
+function renderRecords() {
+  personRecords.innerHTML = "";
+  relationshipRecords.innerHTML = "";
+  eventRecords.innerHTML = "";
+
+  graph.persons.forEach((person) => {
+    appendRecord(personRecords, {
+      title: person.name,
+      meta: `${person.branch} · ${person.generation} · ${person.years}`,
+      actions: [
+        { label: "选择", action: "select-person", id: person.id },
+        { label: "删除", action: "delete-person", id: person.id },
+      ],
+    });
+  });
+
+  graph.relationships.forEach((relationship) => {
+    const source = personById.get(relationship.source);
+    const target = personById.get(relationship.target);
+    appendRecord(relationshipRecords, {
+      title: relationshipTypeLabels[relationship.type] || relationship.type,
+      meta: `${source?.name || "未知人物"} → ${target?.name || "未知人物"}`,
+      actions: [{ label: "删除", action: "delete-relationship", id: relationship.id }],
+    });
+  });
+
+  graph.events.forEach((event) => {
+    const person = personById.get(event.personId);
+    appendRecord(eventRecords, {
+      title: `${event.year} 年 · ${event.title}`,
+      meta: person ? person.name : "未关联人物",
+      actions: [{ label: "删除", action: "delete-event", id: event.id }],
+    });
+  });
 }
 
 function parseLifeYears(yearRange) {
@@ -237,6 +308,21 @@ function selectPerson(personId) {
   eventYear.value = personEvents[0]?.year || timelineYear.value;
   eventTitle.value = personEvents[0]?.title || "家族纪事待补录";
   systemStatus.textContent = `已载入 ${person.name} 的人物档案`;
+}
+
+function resetPersonEditor() {
+  selectedPersonId = null;
+  selectedName.textContent = "未选择";
+  personName.value = "";
+  personGeneration.value = "";
+  personBranch.value = "";
+  personYears.value = "2000-2026";
+  personSummary.value = "";
+  document.querySelectorAll(".person-node").forEach((node) => node.classList.remove("is-selected"));
+  dossierPanel.innerHTML = `
+    <h2>人物档案</h2>
+    <p>选择族谱节点后，此处显示人物生平、关系链与关键事件。</p>
+  `;
 }
 
 function applyZoom() {
@@ -323,6 +409,59 @@ async function saveEvent(event) {
   selectPerson(payload.person_id);
 }
 
+async function deletePerson(personId) {
+  const person = personById.get(personId);
+  const personNameText = person ? person.name : "该人物";
+  if (!window.confirm(`确认删除 ${personNameText}？相关关系与事件也会一并移除。`)) return;
+
+  await api(`/api/families/${familyId}/persons/${personId}`, { method: "DELETE" });
+  if (selectedPersonId === personId) resetPersonEditor();
+  await loadGraph();
+  systemStatus.textContent = `${personNameText} 已从当前家谱中删除`;
+}
+
+async function deleteRelationship(relationshipId) {
+  if (!window.confirm("确认删除这条关系？")) return;
+
+  await api(`/api/families/${familyId}/relationships/${relationshipId}`, { method: "DELETE" });
+  await loadGraph();
+  systemStatus.textContent = "关系已删除，家谱图已刷新";
+}
+
+async function deleteEvent(eventId) {
+  if (!window.confirm("确认删除这条事件？")) return;
+
+  await api(`/api/families/${familyId}/events/${eventId}`, { method: "DELETE" });
+  await loadGraph();
+  if (selectedPersonId && personById.has(selectedPersonId)) selectPerson(selectedPersonId);
+  systemStatus.textContent = "事件已删除，时间轴已刷新";
+}
+
+async function handleRecordAction(event) {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+
+  const { action, id } = button.dataset;
+  if (action === "select-person") {
+    selectPerson(id);
+    return;
+  }
+
+  if (action === "delete-person") {
+    await deletePerson(id);
+    return;
+  }
+
+  if (action === "delete-relationship") {
+    await deleteRelationship(id);
+    return;
+  }
+
+  if (action === "delete-event") {
+    await deleteEvent(id);
+  }
+}
+
 async function loadGraph() {
   graph = await api(`/api/families/${familyId}/graph`);
   renderTree();
@@ -358,14 +497,12 @@ timelineYear.addEventListener("input", updateTimeline);
 personForm.addEventListener("submit", savePerson);
 relationshipForm.addEventListener("submit", saveRelationship);
 eventForm.addEventListener("submit", saveEvent);
+personRecords.addEventListener("click", handleRecordAction);
+relationshipRecords.addEventListener("click", handleRecordAction);
+eventRecords.addEventListener("click", handleRecordAction);
 newPersonButton.addEventListener("click", () => {
-  selectedPersonId = null;
+  resetPersonEditor();
   selectedName.textContent = "新人物";
-  personName.value = "";
-  personGeneration.value = "";
-  personBranch.value = "";
-  personYears.value = "2000-2026";
-  personSummary.value = "";
   personName.focus();
 });
 tabButtons.forEach((button) => {
