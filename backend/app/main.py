@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -27,6 +27,18 @@ class PersonUpdate(BaseModel):
     branch: str = Field(min_length=1, max_length=20)
     years: str = Field(pattern=r"^\d{4}-\d{4}$")
     summary: str = Field(default="", max_length=240)
+
+
+class RelationshipCreate(BaseModel):
+    type: str = Field(pattern=r"^(parent|spouse|adoptive|collateral)$")
+    source: str = Field(min_length=1, max_length=40)
+    target: str = Field(min_length=1, max_length=40)
+
+
+class EventCreate(BaseModel):
+    person_id: str = Field(min_length=1, max_length=40)
+    year: int = Field(ge=1, le=9999)
+    title: str = Field(min_length=1, max_length=80)
 
 
 
@@ -54,6 +66,12 @@ def next_position() -> tuple[int, int]:
     with connect() as connection:
         count = connection.execute("SELECT COUNT(*) FROM persons").fetchone()[0]
     return 90 + (count % 5) * 160, 500 + (count // 5) * 122
+
+
+def assert_person_exists(connection, person_id: str) -> None:
+    exists = connection.execute("SELECT 1 FROM persons WHERE id = ?", (person_id,)).fetchone()
+    if not exists:
+        raise HTTPException(status_code=404, detail="人物不存在")
 
 
 @app.get("/api/health")
@@ -90,7 +108,7 @@ def get_graph(family_id: str) -> dict[str, Any]:
     assert_family(family_id)
     with connect() as connection:
         persons = rows_to_dicts(connection.execute("SELECT * FROM persons ORDER BY y, x").fetchall())
-        relationships = rows_to_dicts(connection.execute("SELECT type, source AS source, target AS target FROM relationships").fetchall())
+        relationships = rows_to_dicts(connection.execute("SELECT id, type, source AS source, target AS target FROM relationships").fetchall())
         events = rows_to_dicts(connection.execute("SELECT id, person_id AS personId, year, title FROM events ORDER BY year").fetchall())
     return {"familyId": family_id, "persons": persons, "relationships": relationships, "events": events}
 
@@ -126,6 +144,70 @@ def update_person(family_id: str, person_id: str, payload: PersonUpdate) -> dict
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="人物不存在")
     return {"id": person_id, **payload.model_dump()}
+
+
+@app.delete("/api/families/{family_id}/persons/{person_id}", status_code=204, response_class=Response)
+def delete_person(family_id: str, person_id: str):
+    assert_family(family_id)
+    with connect() as connection:
+        cursor = connection.execute("DELETE FROM persons WHERE id = ?", (person_id,))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="人物不存在")
+        connection.execute("DELETE FROM relationships WHERE source = ? OR target = ?", (person_id, person_id))
+        connection.execute("DELETE FROM events WHERE person_id = ?", (person_id,))
+
+
+@app.post("/api/families/{family_id}/relationships", status_code=201)
+def create_relationship(family_id: str, payload: RelationshipCreate) -> dict[str, Any]:
+    assert_family(family_id)
+    if payload.source == payload.target:
+        raise HTTPException(status_code=400, detail="关系两端不能是同一人物")
+
+    with connect() as connection:
+        assert_person_exists(connection, payload.source)
+        assert_person_exists(connection, payload.target)
+        try:
+            cursor = connection.execute(
+                "INSERT INTO relationships(type, source, target) VALUES (?, ?, ?)",
+                (payload.type, payload.source, payload.target),
+            )
+        except Exception as exc:
+            if "UNIQUE" in str(exc).upper():
+                raise HTTPException(status_code=409, detail="关系已存在") from exc
+            raise
+
+    return {"id": cursor.lastrowid, **payload.model_dump()}
+
+
+@app.delete("/api/families/{family_id}/relationships/{relationship_id}", status_code=204, response_class=Response)
+def delete_relationship(family_id: str, relationship_id: int):
+    assert_family(family_id)
+    with connect() as connection:
+        cursor = connection.execute("DELETE FROM relationships WHERE id = ?", (relationship_id,))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="关系不存在")
+
+
+@app.post("/api/families/{family_id}/events", status_code=201)
+def create_event(family_id: str, payload: EventCreate) -> dict[str, Any]:
+    assert_family(family_id)
+    event_id = f"e-{uuid4().hex[:8]}"
+    with connect() as connection:
+        assert_person_exists(connection, payload.person_id)
+        connection.execute(
+            "INSERT INTO events(id, person_id, year, title) VALUES (?, ?, ?, ?)",
+            (event_id, payload.person_id, payload.year, payload.title),
+        )
+    return {"id": event_id, "personId": payload.person_id, "year": payload.year, "title": payload.title}
+
+
+@app.delete("/api/families/{family_id}/events/{event_id}", status_code=204, response_class=Response)
+def delete_event(family_id: str, event_id: str):
+    assert_family(family_id)
+    with connect() as connection:
+        cursor = connection.execute("DELETE FROM events WHERE id = ?", (event_id,))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="事件不存在")
 
 
 frontend_dir = ROOT_DIR / "frontend"

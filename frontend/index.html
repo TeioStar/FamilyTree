@@ -76,17 +76,47 @@
             <button data-tab="archive" type="button">资料</button>
           </div>
 
-          <form id="personForm" class="management-grid">
+          <form id="personForm" class="management-grid management-pane is-active" data-pane="person">
             <label>姓名 <input id="personName" required></label>
             <label>字辈 <input id="personGeneration" required></label>
             <label>房支 <input id="personBranch" required></label>
-            <label>生卒 <input id="personYears" pattern="\\d{4}-\\d{4}" required></label>
+            <label>生卒 <input id="personYears" pattern="\d{4}-\d{4}" required></label>
             <label class="wide">生平摘要 <textarea id="personSummary"></textarea></label>
             <div class="form-actions">
               <button id="newPersonButton" type="button">新增人物</button>
               <button type="submit">保存人物</button>
             </div>
           </form>
+
+          <form id="relationshipForm" class="management-grid management-pane" data-pane="relationship">
+            <label>人物 <select id="relationshipSource" required></select></label>
+            <label>关系 <select id="relationshipType" required>
+              <option value="parent">父母/子女</option>
+              <option value="spouse">配偶</option>
+              <option value="adoptive">收养</option>
+              <option value="collateral">旁系</option>
+            </select></label>
+            <label>关联人物 <select id="relationshipTarget" required></select></label>
+            <div class="form-actions">
+              <button type="submit">保存关系</button>
+            </div>
+          </form>
+
+          <form id="eventForm" class="management-grid management-pane" data-pane="event">
+            <label>人物 <select id="eventPerson" required></select></label>
+            <label>年份 <input id="eventYear" type="number" min="1" max="9999" value="1910" required></label>
+            <label class="wide">纪事标题 <input id="eventTitle" value="家族纪事待补录" required></label>
+            <div class="form-actions">
+              <button type="submit">保存事件</button>
+            </div>
+          </form>
+
+          <section id="archivePane" class="management-pane archive-pane" data-pane="archive">
+            <div>
+              <strong>资料归档</strong>
+              <p>下一步将接入族谱扫描件、照片、墓志、口述记录与审计日志。</p>
+            </div>
+          </section>
         </section>
       </main>
     </div>

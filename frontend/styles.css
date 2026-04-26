@@ -257,6 +257,21 @@ h2 {
   gap: 12px;
 }
 
+.management-pane {
+  display: none;
+}
+
+.management-pane.is-active {
+  display: grid;
+}
+
+.archive-pane {
+  border: 1px solid rgba(111, 74, 45, 0.24);
+  background: rgba(246, 239, 217, 0.64);
+  padding: 14px;
+  line-height: 1.7;
+}
+
 .management-grid label {
   display: grid;
   gap: 8px;

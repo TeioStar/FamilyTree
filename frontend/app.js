@@ -12,13 +12,22 @@ const resetButton = document.querySelector("#resetButton");
 const selectedName = document.querySelector("#selectedName");
 const systemStatus = document.querySelector("#systemStatus");
 const personForm = document.querySelector("#personForm");
+const relationshipForm = document.querySelector("#relationshipForm");
+const eventForm = document.querySelector("#eventForm");
 const newPersonButton = document.querySelector("#newPersonButton");
 const tabButtons = document.querySelectorAll("[data-tab]");
+const panes = document.querySelectorAll("[data-pane]");
 const personName = document.querySelector("#personName");
 const personGeneration = document.querySelector("#personGeneration");
 const personBranch = document.querySelector("#personBranch");
 const personYears = document.querySelector("#personYears");
 const personSummary = document.querySelector("#personSummary");
+const relationshipSource = document.querySelector("#relationshipSource");
+const relationshipType = document.querySelector("#relationshipType");
+const relationshipTarget = document.querySelector("#relationshipTarget");
+const eventPerson = document.querySelector("#eventPerson");
+const eventYear = document.querySelector("#eventYear");
+const eventTitle = document.querySelector("#eventTitle");
 
 const svgNamespace = "http://www.w3.org/2000/svg";
 const nodeWidth = 112;
@@ -43,6 +52,10 @@ async function api(path, options = {}) {
 
   if (!response.ok) {
     throw new Error(await response.text());
+  }
+
+  if (response.status === 204) {
+    return null;
   }
 
   return response.json();
@@ -126,6 +139,21 @@ function renderPerson(person) {
   return group;
 }
 
+function renderPersonOptions() {
+  const options = graph.persons
+    .map((person) => `<option value="${person.id}">${person.name} · ${person.branch}</option>`)
+    .join("");
+
+  relationshipSource.innerHTML = options;
+  relationshipTarget.innerHTML = options;
+  eventPerson.innerHTML = options;
+
+  if (selectedPersonId && personById.has(selectedPersonId)) {
+    relationshipSource.value = selectedPersonId;
+    eventPerson.value = selectedPersonId;
+  }
+}
+
 function renderTree() {
   personById = new Map(graph.persons.map((person) => [person.id, person]));
   treeViewport.innerHTML = "";
@@ -134,6 +162,7 @@ function renderTree() {
   graph.relationships.forEach((relationship) => lineLayer.append(renderRelationship(relationship)));
   graph.persons.forEach((person) => nodeLayer.append(renderPerson(person)));
   treeViewport.append(lineLayer, nodeLayer);
+  renderPersonOptions();
   applyZoom();
   updateTimeline();
 }
@@ -172,11 +201,6 @@ function describeRelation(relationship, personId) {
 function selectPerson(personId) {
   selectedPersonId = personId;
   const person = personById.get(personId);
-  const relatedIds = new Set(
-    graph.relationships
-      .filter((relationship) => relationship.source === personId || relationship.target === personId)
-      .map((relationship) => relationship.source === personId ? relationship.target : relationship.source)
-  );
 
   document.querySelectorAll(".person-node").forEach((node) => {
     node.classList.toggle("is-selected", node.dataset.personId === personId);
@@ -208,6 +232,10 @@ function selectPerson(personId) {
   personBranch.value = person.branch;
   personYears.value = person.years;
   personSummary.value = person.summary;
+  relationshipSource.value = person.id;
+  eventPerson.value = person.id;
+  eventYear.value = personEvents[0]?.year || timelineYear.value;
+  eventTitle.value = personEvents[0]?.title || "家族纪事待补录";
   systemStatus.textContent = `已载入 ${person.name} 的人物档案`;
 }
 
@@ -256,6 +284,45 @@ async function savePerson(event) {
   if (selectedPersonId) selectPerson(selectedPersonId);
 }
 
+async function saveRelationship(event) {
+  event.preventDefault();
+  const payload = {
+    type: relationshipType.value,
+    source: relationshipSource.value,
+    target: relationshipTarget.value,
+  };
+
+  if (payload.source === payload.target) {
+    systemStatus.textContent = "关系两端不能是同一人物。";
+    return;
+  }
+
+  await api(`/api/families/${familyId}/relationships`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  systemStatus.textContent = "关系已保存，图谱已刷新。";
+  await loadGraph();
+  selectPerson(payload.source);
+}
+
+async function saveEvent(event) {
+  event.preventDefault();
+  const payload = {
+    person_id: eventPerson.value,
+    year: Number(eventYear.value),
+    title: eventTitle.value.trim(),
+  };
+
+  await api(`/api/families/${familyId}/events`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  systemStatus.textContent = "事件已保存，时间轴已刷新。";
+  await loadGraph();
+  selectPerson(payload.person_id);
+}
+
 async function loadGraph() {
   graph = await api(`/api/families/${familyId}/graph`);
   renderTree();
@@ -289,6 +356,8 @@ resetButton.addEventListener("click", () => {
 });
 timelineYear.addEventListener("input", updateTimeline);
 personForm.addEventListener("submit", savePerson);
+relationshipForm.addEventListener("submit", saveRelationship);
+eventForm.addEventListener("submit", saveEvent);
 newPersonButton.addEventListener("click", () => {
   selectedPersonId = null;
   selectedName.textContent = "新人物";
@@ -301,8 +370,10 @@ newPersonButton.addEventListener("click", () => {
 });
 tabButtons.forEach((button) => {
   button.addEventListener("click", () => {
+    const tabName = button.dataset.tab;
     tabButtons.forEach((tab) => tab.classList.toggle("is-active", tab === button));
-    systemStatus.textContent = `${button.textContent}管理已切换，后续会接入完整编辑表单。`;
+    panes.forEach((pane) => pane.classList.toggle("is-active", pane.dataset.pane === tabName));
+    systemStatus.textContent = `${button.textContent}管理已切换。`;
   });
 });
 
