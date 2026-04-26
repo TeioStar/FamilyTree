@@ -10,6 +10,8 @@ const zoomInButton = document.querySelector("#zoomInButton");
 const zoomOutButton = document.querySelector("#zoomOutButton");
 const resetButton = document.querySelector("#resetButton");
 const exportButton = document.querySelector("#exportButton");
+const importButton = document.querySelector("#importButton");
+const importFileInput = document.querySelector("#importFileInput");
 const selectedName = document.querySelector("#selectedName");
 const systemStatus = document.querySelector("#systemStatus");
 const personForm = document.querySelector("#personForm");
@@ -576,6 +578,23 @@ async function exportFamily() {
   systemStatus.textContent = "家谱 JSON 备份已生成，可用于迁移与归档。";
 }
 
+async function importFamily(file) {
+  const text = await file.text();
+  const payload = JSON.parse(text);
+  if (!window.confirm("导入会覆盖当前家谱数据，确认继续？")) return;
+
+  const result = await api(`/api/families/${familyId}/import`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  selectedPersonId = null;
+  resetPersonEditor();
+  const families = await api("/api/families");
+  renderFamilies(families);
+  await loadGraph();
+  systemStatus.textContent = `导入完成：${result.persons} 位人物、${result.relationships} 条关系、${result.events} 条事件、${result.archives} 条资料。`;
+}
+
 async function boot() {
   const families = await api("/api/families");
   renderFamilies(families);
@@ -605,6 +624,19 @@ resetButton.addEventListener("click", () => {
 exportButton.addEventListener("click", () => {
   exportFamily().catch((error) => {
     systemStatus.textContent = "导出失败，请检查后端服务。";
+    console.error(error);
+  });
+});
+importButton.addEventListener("click", () => {
+  importFileInput.click();
+});
+importFileInput.addEventListener("change", () => {
+  const [file] = importFileInput.files;
+  importFileInput.value = "";
+  if (!file) return;
+
+  importFamily(file).catch((error) => {
+    systemStatus.textContent = "导入失败，请确认备份文件格式正确。";
     console.error(error);
   });
 });

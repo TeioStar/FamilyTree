@@ -50,6 +50,70 @@ class ArchiveCreate(BaseModel):
     source: str = Field(min_length=1, max_length=80)
 
 
+class FamilyImportMeta(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=80)
+    role: str = Field(min_length=1, max_length=40)
+    status: str = Field(min_length=1, max_length=40)
+
+
+class PersonImport(BaseModel):
+    id: str = Field(min_length=1, max_length=40)
+    name: str = Field(min_length=1, max_length=40)
+    generation: str = Field(min_length=1, max_length=8)
+    branch: str = Field(min_length=1, max_length=20)
+    years: str = Field(pattern=r"^\d{4}-\d{4}$")
+    x: int
+    y: int
+    summary: str = Field(default="", max_length=240)
+
+
+class RelationshipImport(BaseModel):
+    id: int
+    type: str = Field(pattern=r"^(parent|spouse|adoptive|collateral)$")
+    source: str = Field(min_length=1, max_length=40)
+    target: str = Field(min_length=1, max_length=40)
+
+
+class EventImport(BaseModel):
+    id: str = Field(min_length=1, max_length=40)
+    personId: str = Field(min_length=1, max_length=40)
+    year: int = Field(ge=1, le=9999)
+    title: str = Field(min_length=1, max_length=80)
+
+
+class ArchiveImport(BaseModel):
+    id: str = Field(min_length=1, max_length=40)
+    personId: str = Field(min_length=1, max_length=40)
+    type: str = Field(pattern=r"^(manuscript|photo|epitaph|oral|contract|other)$")
+    title: str = Field(min_length=1, max_length=80)
+    source: str = Field(min_length=1, max_length=80)
+
+
+class AuditLogImport(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    actor: str = Field(min_length=1, max_length=40)
+    action: str = Field(min_length=1, max_length=40)
+    entityType: str = Field(min_length=1, max_length=40)
+    entityId: str = Field(min_length=1, max_length=80)
+    summary: str = Field(min_length=1, max_length=160)
+    createdAt: str = Field(min_length=1, max_length=40)
+
+
+class FamilyDataImport(BaseModel):
+    persons: list[PersonImport]
+    relationships: list[RelationshipImport]
+    events: list[EventImport]
+    archives: list[ArchiveImport]
+    auditLogs: list[AuditLogImport]
+
+
+class FamilyImportPayload(BaseModel):
+    schemaVersion: int
+    family: FamilyImportMeta
+    data: FamilyDataImport
+
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -91,6 +155,19 @@ def record_audit(connection, action: str, entity_type: str, entity_id: str, summ
         """,
         (f"log-{uuid4().hex[:10]}", "creator", action, entity_type, entity_id, summary),
     )
+
+
+def validate_import_references(payload: FamilyImportPayload) -> None:
+    person_ids = {person.id for person in payload.data.persons}
+    for relationship in payload.data.relationships:
+        if relationship.source not in person_ids or relationship.target not in person_ids:
+            raise HTTPException(status_code=400, detail="导入关系引用了不存在的人物")
+    for event in payload.data.events:
+        if event.personId not in person_ids:
+            raise HTTPException(status_code=400, detail="导入事件引用了不存在的人物")
+    for archive in payload.data.archives:
+        if archive.personId not in person_ids:
+            raise HTTPException(status_code=400, detail="导入资料引用了不存在的人物")
 
 
 @app.get("/api/health")
@@ -185,6 +262,80 @@ def export_family(family_id: str) -> JSONResponse:
         payload,
         headers={"Content-Disposition": f'attachment; filename="{family_id}-familytree-export.json"'},
     )
+
+
+@app.post("/api/families/{family_id}/import")
+def import_family(family_id: str, payload: FamilyImportPayload) -> dict[str, Any]:
+    assert_family(family_id)
+    if payload.schemaVersion != 1:
+        raise HTTPException(status_code=400, detail="暂不支持该导入版本")
+    if payload.family.id != family_id:
+        raise HTTPException(status_code=400, detail="导入家谱与当前家谱不匹配")
+
+    validate_import_references(payload)
+
+    with connect() as connection:
+        connection.execute("DELETE FROM relationships")
+        connection.execute("DELETE FROM events")
+        connection.execute("DELETE FROM archives")
+        connection.execute("DELETE FROM persons")
+        connection.execute("DELETE FROM audit_logs")
+        connection.execute(
+            "UPDATE meta SET value = CASE key WHEN 'name' THEN ? WHEN 'role' THEN ? WHEN 'status' THEN ? ELSE value END",
+            (payload.family.name, payload.family.role, payload.family.status),
+        )
+        connection.executemany(
+            """
+            INSERT INTO persons(id, name, generation, branch, years, x, y, summary)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (person.id, person.name, person.generation, person.branch, person.years, person.x, person.y, person.summary)
+                for person in payload.data.persons
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO relationships(id, type, source, target) VALUES (?, ?, ?, ?)",
+            [
+                (relationship.id, relationship.type, relationship.source, relationship.target)
+                for relationship in payload.data.relationships
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO events(id, person_id, year, title) VALUES (?, ?, ?, ?)",
+            [(event.id, event.personId, event.year, event.title) for event in payload.data.events],
+        )
+        connection.executemany(
+            "INSERT INTO archives(id, person_id, type, title, source) VALUES (?, ?, ?, ?, ?)",
+            [(archive.id, archive.personId, archive.type, archive.title, archive.source) for archive in payload.data.archives],
+        )
+        connection.executemany(
+            """
+            INSERT INTO audit_logs(id, actor, action, entity_type, entity_id, summary, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    log.id,
+                    log.actor,
+                    log.action,
+                    log.entityType,
+                    log.entityId,
+                    log.summary,
+                    log.createdAt,
+                )
+                for log in payload.data.auditLogs
+            ],
+        )
+        record_audit(connection, "import", "family", family_id, f"导入恢复：{payload.family.name}")
+
+    return {
+        "familyId": family_id,
+        "persons": len(payload.data.persons),
+        "relationships": len(payload.data.relationships),
+        "events": len(payload.data.events),
+        "archives": len(payload.data.archives),
+    }
 
 
 @app.post("/api/families/{family_id}/persons", status_code=201)

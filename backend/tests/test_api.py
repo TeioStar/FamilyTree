@@ -33,6 +33,38 @@ def test_export_family_contains_complete_archive_payload():
     assert data["data"]["auditLogs"]
 
 
+def test_import_family_restores_export_payload():
+    export_payload = client.get("/api/families/shen-wuxian/export").json()
+    create_response = client.post(
+        "/api/families/shen-wuxian/persons",
+        json={
+            "name": "临时导入测试",
+            "generation": "临",
+            "branch": "导入支",
+            "years": "1999-2026",
+            "summary": "导入恢复后应被移除",
+        },
+    )
+    assert create_response.status_code == 201
+
+    import_response = client.post("/api/families/shen-wuxian/import", json=export_payload)
+
+    assert import_response.status_code == 200
+    assert import_response.json()["persons"] == len(export_payload["data"]["persons"])
+    graph = client.get("/api/families/shen-wuxian/graph").json()
+    assert all(person["name"] != "临时导入测试" for person in graph["persons"])
+    assert any(log["action"] == "import" and log["entityType"] == "family" for log in graph["auditLogs"])
+
+
+def test_import_family_rejects_wrong_family_id():
+    export_payload = client.get("/api/families/shen-wuxian/export").json()
+    export_payload["family"]["id"] = "other-family"
+
+    response = client.post("/api/families/shen-wuxian/import", json=export_payload)
+
+    assert response.status_code == 400
+
+
 def test_create_person_persists_to_family_database():
     response = client.post(
         "/api/families/shen-wuxian/persons",
