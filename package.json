@@ -1,0 +1,11 @@
+{
+  "name": "familytree",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test:prototype": "playwright test prototype/tests/familytree-visual-wow.spec.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0"
+  }
+}

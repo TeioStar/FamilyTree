@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>云谱档案 · 家谱管理系统</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <h1>云谱档案</h1>
+        <div class="toolbar">
+          <input id="searchInput" type="search" placeholder="搜索姓名、字辈或房支" aria-label="搜索姓名、字辈或房支">
+          <button id="searchButton" type="button">寻人</button>
+          <button id="zoomOutButton" type="button">缩小</button>
+          <button id="zoomInButton" type="button">放大</button>
+          <button id="resetButton" type="button">归位</button>
+        </div>
+        <div class="seal">谱</div>
+      </header>
+
+      <main class="workspace">
+        <aside id="familyRegistry" class="panel registry-panel">
+          <h2>家谱库</h2>
+          <div id="familyList" class="family-list">正在读取家谱文件...</div>
+          <div class="workflow">
+            <strong>系统流程</strong>
+            <ol>
+              <li>选择家谱文件</li>
+              <li>录入人物</li>
+              <li>建立关系</li>
+              <li>补充事件与资料</li>
+            </ol>
+          </div>
+        </aside>
+
+        <section class="panel tree-panel" aria-label="家谱图">
+          <svg id="familyCanvas" viewBox="0 0 960 620" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <pattern id="riceGrid" width="48" height="48" patternUnits="userSpaceOnUse">
+                <path d="M 48 0 L 0 0 0 48" fill="none" stroke="rgba(111, 74, 45, 0.12)" stroke-width="1"></path>
+              </pattern>
+            </defs>
+            <rect width="960" height="620" fill="url(#riceGrid)"></rect>
+            <g id="treeViewport"></g>
+          </svg>
+        </section>
+
+        <aside id="dossierPanel" class="panel dossier-panel">
+          <h2>人物档案</h2>
+          <p>选择族谱节点后，此处显示人物生平、关系链与关键事件。</p>
+        </aside>
+
+        <section class="panel timeline-panel">
+          <h2>家族时间轴</h2>
+          <label for="timelineYear">当前年份 <span id="timelineCurrentYear">1910</span></label>
+          <input id="timelineYear" type="range" min="1840" max="2026" value="1910">
+          <div id="timelineEvents" class="timeline-events"></div>
+        </section>
+
+        <section id="managementPanel" class="panel management-panel">
+          <div class="management-header">
+            <div>
+              <h2>管理台</h2>
+              <p>当前对象：<strong id="selectedName">未选择</strong></p>
+            </div>
+            <p id="systemStatus">系统已连接后端 API。</p>
+          </div>
+
+          <div class="tabs" role="tablist">
+            <button class="is-active" data-tab="person" type="button">人物</button>
+            <button data-tab="relationship" type="button">关系</button>
+            <button data-tab="event" type="button">事件</button>
+            <button data-tab="archive" type="button">资料</button>
+          </div>
+
+          <form id="personForm" class="management-grid">
+            <label>姓名 <input id="personName" required></label>
+            <label>字辈 <input id="personGeneration" required></label>
+            <label>房支 <input id="personBranch" required></label>
+            <label>生卒 <input id="personYears" pattern="\\d{4}-\\d{4}" required></label>
+            <label class="wide">生平摘要 <textarea id="personSummary"></textarea></label>
+            <div class="form-actions">
+              <button id="newPersonButton" type="button">新增人物</button>
+              <button type="submit">保存人物</button>
+            </div>
+          </form>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
